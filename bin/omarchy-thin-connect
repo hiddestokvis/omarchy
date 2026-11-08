@@ -1,0 +1,41 @@
+#!/bin/bash
+
+# omarchy:summary=Hold the connection to the Omarchy server (run by omarchy-thin.service)
+# omarchy:hidden=true
+
+# One SSH connection carries the whole session. waypipe runs as its
+# ControlMaster and proxies the Wayland protocol: windows are drawn by this
+# device's compositor, so moving, resizing, animations, the cursor and typing
+# echo are local and instant. Only the pixels an app actually changes cross the
+# network, as lossless compressed diffs, never as a video stream.
+
+set -uo pipefail
+
+source "$OMARCHY_PATH/default/thin/client.sh"
+thin_load_config || exit 1
+
+mkdir -p -m 700 "$OMARCHY_THIN_STATE"
+rm -f "$OMARCHY_THIN_CONTROL"
+
+waypipe_options=(--compress "$OMARCHY_THIN_COMPRESS")
+if (( ! OMARCHY_THIN_GPU )); then
+  waypipe_options+=(--no-gpu)
+fi
+
+ssh_options=(
+  "${OMARCHY_THIN_SSH_OPTS[@]}"
+  -o ControlMaster=yes
+  -o ControlPersist=no
+  -o ExitOnForwardFailure=yes
+)
+
+if [[ $OMARCHY_THIN_AUDIO == "pulse" ]]; then
+  if [[ -z $OMARCHY_THIN_REMOTE_RUNTIME ]]; then
+    echo "OMARCHY_THIN_AUDIO=pulse needs OMARCHY_THIN_REMOTE_RUNTIME; rerun omarchy-thin-setup" >&2
+    exit 1
+  fi
+  ssh_options+=(-R "$OMARCHY_THIN_REMOTE_RUNTIME/omarchy-thin-pulse.sock:$XDG_RUNTIME_DIR/pulse/native")
+fi
+
+exec waypipe "${waypipe_options[@]}" ssh "${ssh_options[@]}" "$OMARCHY_THIN_SERVER" \
+  omarchy-server-session --audio="$OMARCHY_THIN_AUDIO"

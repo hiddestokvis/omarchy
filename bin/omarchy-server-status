@@ -1,0 +1,21 @@
+#!/bin/bash
+
+# omarchy:summary=Show who is connected to this Omarchy server and what they use
+
+printf '%-16s %-10s %10s %12s %9s\n' USER SESSION MEMORY CPU-TIME PROCESSES
+
+while IFS= read -r user; do
+  [[ -n $user ]] || continue
+  uid=$(id -u "$user" 2>/dev/null) || continue
+
+  session=offline
+  pgrep -u "$user" -f omarchy-server-session >/dev/null && session=connected
+
+  memory=$(systemctl show "user-$uid.slice" -p MemoryCurrent --value 2>/dev/null)
+  cpu=$(systemctl show "user-$uid.slice" -p CPUUsageNSec --value 2>/dev/null)
+  [[ $memory =~ ^[0-9]+$ ]] && memory=$(numfmt --to=iec "$memory") || memory=-
+  [[ $cpu =~ ^[0-9]+$ ]] && cpu="$((cpu / 1000000000))s" || cpu=-
+  processes=$(pgrep -u "$user" -c)
+
+  printf '%-16s %-10s %10s %12s %9s\n' "$user" "$session" "$memory" "$cpu" "$processes"
+done </etc/omarchy-server/users 2>/dev/null

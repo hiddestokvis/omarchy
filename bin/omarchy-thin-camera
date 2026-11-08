@@ -1,0 +1,90 @@
+#!/bin/bash
+
+# omarchy:summary=Share this device's camera with apps on the Omarchy server
+# omarchy:args=[on|off|toggle|status]
+# omarchy:examples=omarchy thin camera toggle | omarchy thin camera status
+
+# The camera shows up on the server as a regular webcam (a v4l2loopback device
+# that only you can open), so browsers and call apps there just pick it. The
+# camera is a live picture, so this is the one stream that has to be encoded
+# as video; it only runs while switched on.
+
+set -uo pipefail
+
+source "$OMARCHY_PATH/default/thin/client.sh"
+
+unit=omarchy-thin-camera.service
+
+camera_on() {
+  if systemctl --user start "$unit"; then
+    omarchy-notification-send -g 󰄀 "Camera shared with the server" "Turn it off with Super + Ctrl + Alt + V"
+  fi
+}
+
+camera_off() {
+  systemctl --user stop "$unit"
+  omarchy-notification-send -g 󰗟 "Camera no longer shared"
+}
+
+encoder_options() {
+  local encoder=$OMARCHY_THIN_CAMERA_ENCODER
+
+  if [[ $encoder == "auto" ]]; then
+    if omarchy-hw-aarch64 && ffmpeg -hide_banner -encoders 2>/dev/null | grep -q h264_v4l2m2m; then
+      encoder=h264_v4l2m2m
+    else
+      encoder=libx264
+    fi
+  fi
+
+  case $encoder in
+  copy)
+    echo "-c:v copy -f mjpeg"
+    ;;
+  libx264)
+    echo "-c:v libx264 -preset ultrafast -tune zerolatency -profile:v baseline -pix_fmt yuv420p -b:v $OMARCHY_THIN_CAMERA_BITRATE -maxrate $OMARCHY_THIN_CAMERA_BITRATE -bufsize $OMARCHY_THIN_CAMERA_BITRATE -g $((OMARCHY_THIN_CAMERA_FPS * 2)) -f h264"
+    ;;
+  *)
+    echo "-c:v $encoder -pix_fmt yuv420p -b:v $OMARCHY_THIN_CAMERA_BITRATE -g $((OMARCHY_THIN_CAMERA_FPS * 2)) -f h264"
+    ;;
+  esac
+}
+
+stream() {
+  thin_load_config || exit 1
+  thin_wait_connected 30 || exit 1
+
+  local format=h264
+  [[ $OMARCHY_THIN_CAMERA_ENCODER == "copy" ]] && format=mjpeg
+
+  # Ask the camera for MJPEG: most USB webcams only reach 720p30 in it.
+  # shellcheck disable=SC2046
+  ffmpeg -hide_banner -loglevel error -nostdin \
+    -f v4l2 -input_format mjpeg -framerate "$OMARCHY_THIN_CAMERA_FPS" -video_size "$OMARCHY_THIN_CAMERA_SIZE" \
+    -i "$OMARCHY_THIN_CAMERA_DEVICE" -an $(encoder_options) - |
+    thin_ssh -T "$OMARCHY_THIN_SERVER" -- omarchy-server-camera "$format"
+}
+
+case ${1:-toggle} in
+on) camera_on ;;
+off) camera_off ;;
+toggle)
+  if systemctl --user is-active --quiet "$unit"; then
+    camera_off
+  else
+    camera_on
+  fi
+  ;;
+status)
+  if systemctl --user is-active --quiet "$unit"; then
+    echo on
+  else
+    echo off
+  fi
+  ;;
+stream) stream ;;
+*)
+  echo "Usage: omarchy-thin-camera [on|off|toggle|status]" >&2
+  exit 1
+  ;;
+esac

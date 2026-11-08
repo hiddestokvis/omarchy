@@ -1,0 +1,66 @@
+#!/bin/bash
+
+# omarchy:summary=Show the Omarchy server's apps in this thin client's launcher
+# omarchy:args=[--force]
+
+# Copies the server's desktop entries into ~/.local/share/omarchy-thin, which
+# the thin client session puts first on XDG_DATA_DIRS, and points each one at
+# omarchy-thin-run. The launcher, xdg-open and default apps then reach the
+# server's apps without them being installed here. Apps installed on this
+# device keep their own entries.
+
+set -euo pipefail
+
+source "$OMARCHY_PATH/default/thin/client.sh"
+thin_load_config
+
+thin_wait_connected 30 || {
+  echo "Not connected to $OMARCHY_THIN_SERVER" >&2
+  exit 1
+}
+
+target="$HOME/.local/share/omarchy-thin"
+fingerprint_file="$target/.fingerprint"
+
+fingerprint=$(thin_ssh -T "$OMARCHY_THIN_SERVER" -- omarchy-server-apps-export --fingerprint)
+if [[ ${1:-} != "--force" && -f $fingerprint_file && $(<"$fingerprint_file") == "$fingerprint" ]]; then
+  exit 0
+fi
+
+stage=$(mktemp -d)
+trap 'rm -rf "$stage"' EXIT
+thin_ssh -T "$OMARCHY_THIN_SERVER" -- omarchy-server-apps-export | tar -C "$stage" -xzf -
+
+shopt -s nullglob
+for entry in "$stage"/applications/*.desktop; do
+  id=${entry##*/}
+  if [[ -f /usr/share/applications/$id || -f /usr/local/share/applications/$id || -f $HOME/.local/share/applications/$id ]]; then
+    rm -f "$entry"
+    continue
+  fi
+
+  exec_name=$(sed -n 's/^Exec=//p' "$entry" | head -1)
+  read -r exec_name _ <<<"$exec_name"
+  exec_name=${exec_name//\"/}
+  exec_name=${exec_name##*/}
+  # Launchers the overlay forwards (web apps, the browser) stay: they run there.
+  if [[ ! -e $OMARCHY_PATH/default/thin/bin/$exec_name && $(thin_command_location "$exec_name") == "local" ]]; then
+    rm -f "$entry"
+    continue
+  fi
+
+  # TryExec would hide the entry (the binary is not here), and D-Bus activation
+  # would look for the service locally; Exec goes through the server instead.
+  sed -i \
+    -e '/^TryExec=/d' \
+    -e '/^DBusActivatable=/d' \
+    -e 's|^Exec=|Exec=omarchy-thin-run |' \
+    -e "s|^Icon=/|Icon=$target/abs/|" \
+    "$entry"
+done
+
+rm -rf "$target"
+mkdir -p "$target"
+cp -a "$stage"/. "$target"/
+echo "$fingerprint" >"$fingerprint_file"
+update-desktop-database "$target/applications" >/dev/null 2>&1 || true

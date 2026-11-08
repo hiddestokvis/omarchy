@@ -1,0 +1,61 @@
+#!/bin/bash
+
+# omarchy:summary=Pack the caller's app launcher entries and icons for a thin client
+# omarchy:args=[--fingerprint]
+# omarchy:hidden=true
+
+# Writes a tar stream to stdout: applications/ holds every desktop entry this
+# user sees (first match on XDG_DATA_DIRS wins, as for a launcher), icons/ and
+# pixmaps/ the icons those entries name, and abs/ icons given by absolute path.
+
+set -euo pipefail
+
+IFS=: read -ra data_dirs <<<"${XDG_DATA_HOME:-$HOME/.local/share}:${XDG_DATA_DIRS:-/usr/local/share:/usr/share}"
+
+declare -A entries=()
+for data_dir in "${data_dirs[@]}"; do
+  [[ -d $data_dir/applications ]] || continue
+  while IFS= read -r -d '' file; do
+    id=${file#"$data_dir/applications/"}
+    id=${id//\//-}
+    [[ -n ${entries[$id]:-} ]] || entries[$id]=$file
+  done < <(find -L "$data_dir/applications" -name '*.desktop' -type f -print0 2>/dev/null)
+done
+
+if [[ ${1:-} == "--fingerprint" ]]; then
+  for id in "${!entries[@]}"; do
+    printf '%s %s\n' "$id" "$(stat -L -c %Y "${entries[$id]}")"
+  done | sort | sha256sum | cut -d' ' -f1
+  exit 0
+fi
+
+stage=$(mktemp -d)
+trap 'rm -rf "$stage"' EXIT
+mkdir -p "$stage/applications"
+
+declare -A icons=()
+for id in "${!entries[@]}"; do
+  cp -L "${entries[$id]}" "$stage/applications/$id"
+  while IFS= read -r icon; do
+    [[ -n $icon ]] && icons[$icon]=1
+  done < <(sed -n 's/^Icon=//p' "${entries[$id]}")
+done
+
+for icon in "${!icons[@]}"; do
+  if [[ $icon == /* ]]; then
+    [[ -f $icon ]] && install -D -m 644 "$icon" "$stage/abs$icon"
+    continue
+  fi
+
+  for data_dir in "${data_dirs[@]}"; do
+    # Only hicolor and pixmaps: themed icons (Yaru, Adwaita) exist on the client too.
+    while IFS= read -r -d '' file; do
+      install -D -m 644 "$file" "$stage/${file#"$data_dir/"}"
+    done < <(find -L "$data_dir/icons/hicolor" "$data_dir/pixmaps" -maxdepth 4 \
+      \( -name "$icon.png" -o -name "$icon.svg" -o -name "$icon.xpm" \) \
+      \( -path '*/48x48/*' -o -path '*/128x128/*' -o -path '*/256x256/*' -o -path '*/scalable/*' -o -path '*/pixmaps/*' \) \
+      -type f -print0 2>/dev/null)
+  done
+done
+
+tar -C "$stage" -czf - .

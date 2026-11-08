@@ -1,0 +1,45 @@
+#!/bin/bash
+
+# omarchy:summary=Let a person log in to this Omarchy server from a thin client
+# omarchy:args=<username> [--key <public-key-file>]
+# omarchy:requires-sudo=true
+
+set -euo pipefail
+
+if (( EUID != 0 )); then
+  exec sudo "$0" "$@"
+fi
+
+user=${1:-}
+key=""
+if [[ ${2:-} == "--key" ]]; then
+  key=${3:?Missing public key file}
+fi
+
+if [[ ! $user =~ ^[a-z_][a-z0-9_-]{0,31}$ ]]; then
+  echo "Usage: omarchy-server-user-add <username> [--key <public-key-file>]" >&2
+  exit 1
+fi
+
+if ! id "$user" >/dev/null 2>&1; then
+  useradd --create-home --shell /bin/bash "$user"
+  echo "Set a password for $user (used once, by omarchy thin setup, to install the device key):"
+  passwd "$user"
+  # Shipped configs came from /etc/skel; finish the per-user setup as the user.
+  sudo -u "$user" -i omarchy-provision-user || echo "omarchy-provision-user did not finish; $user can run 'omarchy finalize user' later." >&2
+fi
+
+if [[ -n $key ]]; then
+  home=$(getent passwd "$user" | cut -d: -f6)
+  install -d -m 700 -o "$user" -g "$(id -gn "$user")" "$home/.ssh"
+  cat "$key" >>"$home/.ssh/authorized_keys"
+  chown "$user:" "$home/.ssh/authorized_keys"
+  chmod 600 "$home/.ssh/authorized_keys"
+fi
+
+if ! grep -qxF "$user" /etc/omarchy-server/users; then
+  echo "$user" >>/etc/omarchy-server/users
+fi
+omarchy-server-cameras --apply
+
+echo "$user can now connect. On their device run: omarchy thin setup $user@$(hostname)"

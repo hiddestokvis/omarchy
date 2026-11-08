@@ -1,0 +1,19 @@
+#!/bin/bash
+
+# omarchy:summary=Open a shell or run a terminal command on the Omarchy server
+# omarchy:args=[command] [args...]
+# omarchy:hidden=true
+
+# Runs inside a terminal on the thin client. Only text crosses the network, and
+# it rides the shared connection, so a new terminal opens without a handshake.
+# Should that connection be down, ssh falls back to a direct one.
+
+source "$OMARCHY_PATH/default/thin/client.sh"
+thin_load_config || exit 1
+
+remote=(omarchy-server-exec)
+if (($#)); then
+  remote+=("$(thin_remote_command "$@")")
+fi
+
+exec ssh "${OMARCHY_THIN_SSH_OPTS[@]}" -o ControlMaster=no -t "$OMARCHY_THIN_SERVER" -- "${remote[@]}"

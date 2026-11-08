@@ -1,0 +1,20 @@
+#!/bin/bash
+
+# omarchy:summary=Show notifications from apps on the Omarchy server
+# omarchy:hidden=true
+
+set -uo pipefail
+
+source "$OMARCHY_PATH/default/thin/client.sh"
+thin_load_config || exit 1
+thin_wait_connected 60 || exit 1
+
+thin_ssh -T "$OMARCHY_THIN_SERVER" -- omarchy-server-notify-bridge |
+  while IFS= read -r line; do
+    app=$(jq -r '.app // "Omarchy server"' <<<"$line") || continue
+    summary=$(jq -r '.summary // ""' <<<"$line")
+    body=$(jq -r '.body // ""' <<<"$line")
+    urgency=$(jq -r '.urgency // "normal"' <<<"$line")
+    [[ -n $summary ]] || summary=$app
+    omarchy-notification-send --app-name "$app" -u "$urgency" "$summary" "$body" >/dev/null 2>&1 || true
+  done

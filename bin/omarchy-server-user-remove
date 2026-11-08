@@ -1,0 +1,31 @@
+#!/bin/bash
+
+# omarchy:summary=Stop a person from using this Omarchy server from a thin client
+# omarchy:args=<username>
+# omarchy:requires-sudo=true
+
+# Keeps the account and its files; only the thin client access and the
+# reserved camera go.
+
+set -euo pipefail
+
+if (( EUID != 0 )); then
+  exec sudo "$0" "$@"
+fi
+
+user=${1:-}
+if [[ ! $user =~ ^[a-z_][a-z0-9_-]{0,31}$ ]]; then
+  echo "Usage: omarchy-server-user-remove <username>" >&2
+  exit 1
+fi
+
+sed -i "/^$user\$/d" /etc/omarchy-server/users
+omarchy-server-cameras --apply
+
+home=$(getent passwd "$user" | cut -d: -f6 || true)
+if [[ -n $home && -f $home/.ssh/authorized_keys ]]; then
+  sed -i '/omarchy-thin$/d' "$home/.ssh/authorized_keys"
+fi
+
+pkill -u "$user" -f omarchy-server-session || true
+echo "$user can no longer connect from a thin client. Their account and files are untouched."

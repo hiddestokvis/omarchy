@@ -1,0 +1,11 @@
+# Omarchy server for thin clients (omarchy-server-setup), on top of a normal
+# Omarchy install that provides the apps themselves.
+openssh
+waypipe
+xwayland-satellite
+v4l2loopback-dkms
+v4l2loopback-utils
+gst-plugins-base
+gst-plugins-good
+ffmpeg
+python-gobject

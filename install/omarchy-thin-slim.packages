@@ -1,0 +1,18 @@
+# Desktop apps and services that run on the server once a device is a thin
+# client, removed by omarchy-thin-setup --slim to free disk and memory on
+# small devices. Terminals, the shell and hardware tools stay.
+chromium
+libreoffice-fresh
+obsidian
+pinta
+localsend
+evince
+gnome-disk-utility
+dotnet-runtime
+docker
+docker-buildx
+docker-compose
+ufw-docker
+omarchy-local-ai
+mariadb-libs
+postgresql-libs

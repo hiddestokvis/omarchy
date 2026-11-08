@@ -1,0 +1,26 @@
+#!/bin/bash
+
+# omarchy:summary=Feed a thin client's camera stream into the caller's server webcam
+# omarchy:args=<h264|mjpeg>
+# omarchy:hidden=true
+
+# Reads the camera stream from stdin and writes it to the v4l2loopback device
+# omarchy-server-cameras reserved for this user, which apps see as a webcam.
+
+set -uo pipefail
+
+format=${1:-h264}
+[[ $format == "h264" || $format == "mjpeg" ]] || {
+  echo "Usage: omarchy-server-camera <h264|mjpeg>" >&2
+  exit 1
+}
+
+device=$(omarchy-server-cameras --device "$USER")
+if [[ -z $device || ! -w $device ]]; then
+  echo "omarchy-server-camera: no camera device reserved for $USER (ask an admin to run: omarchy server user add $USER)" >&2
+  exit 1
+fi
+
+exec ffmpeg -hide_banner -loglevel error -nostdin \
+  -fflags nobuffer -flags low_delay -probesize 32768 -analyzeduration 0 \
+  -f "$format" -i pipe:0 -an -vf format=yuv420p -f v4l2 "$device"

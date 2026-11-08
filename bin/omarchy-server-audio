@@ -1,0 +1,36 @@
+#!/bin/bash
+
+# omarchy:summary=Stream a thin client session's audio over the SSH channel
+# omarchy:args=<speakers [bitrate]|mic>
+# omarchy:hidden=true
+
+# speakers: what apps play into the session's sink, as Opus/RTP on stdout.
+# mic: Opus/RTP from the client on stdin, into the session's microphone.
+
+set -uo pipefail
+
+state="$XDG_RUNTIME_DIR/omarchy-thin"
+rtp_caps="application/x-rtp-stream,media=audio,clock-rate=48000,encoding-name=OPUS,payload=96"
+
+case ${1:-} in
+speakers)
+  bitrate=${2:-96000}
+  exec gst-launch-1.0 -q pulsesrc device=omarchy_thin_speakers.monitor buffer-time=20000 latency-time=10000 ! \
+    audioconvert ! audioresample ! audio/x-raw,rate=48000,channels=2 ! \
+    opusenc bitrate="$bitrate" frame-size=10 ! rtpopuspay pt=96 ! rtpstreampay ! fdsink fd=1 sync=false
+  ;;
+mic)
+  if [[ ! -p $state/mic.fifo ]]; then
+    echo "omarchy-server-audio: no thin client session microphone for $USER" >&2
+    exit 1
+  fi
+  exec gst-launch-1.0 -q fdsrc fd=0 do-timestamp=true ! "$rtp_caps" ! rtpstreamdepay ! \
+    rtpjitterbuffer latency=40 ! rtpopusdepay ! opusdec plc=true ! \
+    audioconvert ! audioresample ! audio/x-raw,format=S16LE,rate=48000,channels=1 ! \
+    filesink location="$state/mic.fifo" sync=true buffer-mode=unbuffered
+  ;;
+*)
+  echo "Usage: omarchy-server-audio <speakers [bitrate]|mic>" >&2
+  exit 1
+  ;;
+esac

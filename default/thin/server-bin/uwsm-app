@@ -1,0 +1,12 @@
+#!/bin/bash
+
+# Server overlay for uwsm-app inside a thin client session. There is no uwsm
+# session on the server, so Omarchy's launchers starting apps here hand them
+# to omarchy-server-launch, which shows them on the thin client.
+
+while (($#)) && [[ $1 != "--" ]]; do
+  shift
+done
+[[ ${1:-} == "--" ]] && shift
+
+exec omarchy-server-launch "$@"

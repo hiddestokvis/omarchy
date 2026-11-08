@@ -1,0 +1,32 @@
+#!/bin/bash
+
+# omarchy:summary=Show the thin client's connection, streams and bandwidth use
+
+source "$OMARCHY_PATH/default/thin/client.sh"
+thin_load_config || exit 1
+
+echo "Server:  $OMARCHY_THIN_SERVER (port $OMARCHY_THIN_PORT)"
+if thin_connected; then
+  echo "Session: connected"
+else
+  echo "Session: not connected"
+fi
+
+for unit in omarchy-thin omarchy-thin-speakers omarchy-thin-mic omarchy-thin-notifications omarchy-thin-camera; do
+  printf '  %-28s %s\n' "$unit" "$(systemctl --user is-active "$unit.service" 2>/dev/null)"
+done
+
+# Bytes on the shared connection, read from the kernel's TCP stats for ssh.
+port=$OMARCHY_THIN_PORT
+stats=$(ss -tinH state established "( dport = :$port )" 2>/dev/null)
+if [[ -n $stats ]]; then
+  read -r sent received rtt < <(awk '
+    { for (i = 1; i <= NF; i++) {
+        split($i, kv, ":")
+        if (kv[1] == "bytes_acked") sent += kv[2]
+        if (kv[1] == "bytes_received") received += kv[2]
+        if (kv[1] == "rtt" && rtt == "") { split(kv[2], r, "/"); rtt = r[1] }
+    } }
+    END { print sent + 0, received + 0, (rtt == "" ? "?" : rtt) }' <<<"$stats")
+  echo "Traffic: $(numfmt --to=iec "${received:-0}")B down, $(numfmt --to=iec "${sent:-0}")B up, rtt $rtt ms"
+fi

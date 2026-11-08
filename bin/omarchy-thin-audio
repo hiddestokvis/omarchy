@@ -1,0 +1,43 @@
+#!/bin/bash
+
+# omarchy:summary=Carry thin client audio to or from the Omarchy server
+# omarchy:args=<speakers|mic>
+# omarchy:hidden=true
+
+# Opus over the shared SSH connection, framed as RTP (RFC 4571) so the far end
+# can rebuild timing in a jitter buffer. 10 ms frames keep latency low enough
+# for calls; DTX makes a silent microphone cost almost nothing.
+
+set -uo pipefail
+
+source "$OMARCHY_PATH/default/thin/client.sh"
+thin_load_config || exit 1
+
+# Exit status 77 tells systemd not to restart a stream that is switched off.
+if [[ $OMARCHY_THIN_AUDIO != "opus" ]]; then
+  exit 77
+fi
+
+thin_wait_connected 60 || exit 1
+
+rtp_caps="application/x-rtp-stream,media=audio,clock-rate=48000,encoding-name=OPUS,payload=96"
+
+case ${1:-} in
+speakers)
+  thin_ssh -T "$OMARCHY_THIN_SERVER" -- omarchy-server-audio speakers "$OMARCHY_THIN_SPEAKER_BITRATE" |
+    gst-launch-1.0 -q fdsrc fd=0 do-timestamp=true ! "$rtp_caps" ! rtpstreamdepay ! \
+      rtpjitterbuffer latency=60 ! rtpopusdepay ! opusdec plc=true ! \
+      audioconvert ! audioresample ! pulsesink client-name="Omarchy server"
+  ;;
+mic)
+  gst-launch-1.0 -q pulsesrc client-name="Omarchy server" buffer-time=20000 latency-time=10000 ! \
+    audioconvert ! audioresample ! audio/x-raw,rate=48000,channels=1 ! \
+    opusenc bitrate="$OMARCHY_THIN_MIC_BITRATE" frame-size=10 audio-type=voice dtx=true ! \
+    rtpopuspay pt=96 ! rtpstreampay ! fdsink fd=1 sync=false |
+    thin_ssh -T "$OMARCHY_THIN_SERVER" -- omarchy-server-audio mic
+  ;;
+*)
+  echo "Usage: omarchy-thin-audio <speakers|mic>" >&2
+  exit 1
+  ;;
+esac

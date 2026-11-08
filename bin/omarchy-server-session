@@ -1,0 +1,139 @@
+#!/bin/bash
+
+# omarchy:summary=Run a thin client session on the server (started by the client through waypipe)
+# omarchy:args=[--audio=opus|pulse|off]
+# omarchy:hidden=true
+
+# waypipe server starts this with WAYLAND_DISPLAY pointing at the socket it
+# proxies to the thin client. Every app this user starts while the session is
+# up (from a launcher, a terminal or D-Bus activation) gets that display, so
+# its windows appear on the thin client. The session ends when the client
+# disconnects, and everything it set up goes with it.
+
+set -uo pipefail
+
+audio=opus
+for arg in "$@"; do
+  case $arg in
+  --audio=*) audio=${arg#--audio=} ;;
+  esac
+done
+
+if [[ -z ${WAYLAND_DISPLAY:-} ]]; then
+  echo "omarchy-server-session: run by omarchy-thin-connect on a thin client, not directly" >&2
+  exit 1
+fi
+
+# One session per person: connecting from another device takes over, so the
+# speakers, microphone and app launches all follow the newest device.
+for pid in $(pgrep -u "$UID" -f '^/bin/bash .*omarchy-server-session' || true); do
+  (( pid != $$ )) && kill "$pid" 2>/dev/null
+done
+for _ in {1..20}; do
+  pgrep -u "$UID" -f '^/bin/bash .*omarchy-server-session' | grep -vqx "$$" || break
+  sleep 0.1
+done
+
+state="$XDG_RUNTIME_DIR/omarchy-thin"
+env_file="$state/env"
+mkdir -p -m 700 "$state"
+
+children=()
+modules=()
+session_vars=(WAYLAND_DISPLAY DISPLAY XDG_SESSION_TYPE XDG_CURRENT_DESKTOP PATH PULSE_SERVER OMARCHY_THIN_SESSION
+  MOZ_ENABLE_WAYLAND ELECTRON_OZONE_PLATFORM_HINT QT_QPA_PLATFORM GDK_BACKEND SDL_VIDEODRIVER)
+
+cleanup() {
+  local pid module
+  for pid in "${children[@]}"; do
+    kill "$pid" 2>/dev/null
+  done
+  for module in "${modules[@]}"; do
+    pactl unload-module "$module" 2>/dev/null
+  done
+  # Leave the files alone if a newer session already took over.
+  if grep -qxF "WAYLAND_DISPLAY=\"$WAYLAND_DISPLAY\"" "$env_file" 2>/dev/null; then
+    rm -f "$env_file" "$state/mic.fifo"
+    systemctl --user unset-environment "${session_vars[@]}" 2>/dev/null
+  fi
+}
+trap cleanup EXIT
+trap 'exit 0' TERM INT HUP
+
+# X11-only apps get an X server of their own, drawn into the Wayland display.
+DISPLAY=""
+if omarchy-cmd-present xwayland-satellite; then
+  for number in {20..99}; do
+    [[ -e /tmp/.X11-unix/X$number || -e /tmp/.X$number-lock ]] && continue
+    xwayland-satellite ":$number" >/dev/null 2>&1 &
+    pid=$!
+    sleep 0.5
+    if kill -0 "$pid" 2>/dev/null; then
+      children+=("$pid")
+      DISPLAY=":$number"
+      break
+    fi
+  done
+fi
+
+PULSE_SERVER=""
+case $audio in
+pulse)
+  PULSE_SERVER="unix:$XDG_RUNTIME_DIR/omarchy-thin-pulse.sock"
+  ;;
+opus)
+  # PipeWire runs per user and is socket activated; give it a moment on first use.
+  for _ in {1..20}; do
+    pactl info >/dev/null 2>&1 && break
+    sleep 0.25
+  done
+
+  # Apps play into a private sink that omarchy-server-audio streams to the
+  # client, and record from a source fed by the client's microphone.
+  rm -f "$state/mic.fifo"
+  mkfifo -m 600 "$state/mic.fifo"
+  if module=$(pactl load-module module-null-sink sink_name=omarchy_thin_speakers \
+    sink_properties=device.description=Thin-client-speakers); then
+    modules+=("$module")
+    pactl set-default-sink omarchy_thin_speakers
+  fi
+  if module=$(pactl load-module module-pipe-source source_name=omarchy_thin_mic "file=$state/mic.fifo" \
+    format=s16le rate=48000 channels=1 source_properties=device.description=Thin-client-microphone); then
+    modules+=("$module")
+    pactl set-default-source omarchy_thin_mic
+  fi
+  ;;
+esac
+
+export WAYLAND_DISPLAY DISPLAY PULSE_SERVER
+export XDG_SESSION_TYPE=wayland
+export XDG_CURRENT_DESKTOP=Hyprland
+export OMARCHY_THIN_SESSION=1
+export PATH="${OMARCHY_PATH:-/usr/share/omarchy}/default/thin/server-bin:$PATH"
+export MOZ_ENABLE_WAYLAND=1
+export ELECTRON_OZONE_PLATFORM_HINT=wayland
+export QT_QPA_PLATFORM="wayland;xcb"
+export GDK_BACKEND="wayland,x11"
+export SDL_VIDEODRIVER="wayland,x11"
+
+# Shared with omarchy-server-launch and omarchy-server-exec (bash and
+# systemd EnvironmentFile both read this format).
+: >"$env_file"
+for var in "${session_vars[@]}"; do
+  [[ -n ${!var:-} ]] && printf '%s="%s"\n' "$var" "${!var}" >>"$env_file"
+done
+
+# D-Bus activated apps (Nautilus, portals) start from the user manager, so it
+# needs the display too.
+present_vars=()
+for var in "${session_vars[@]}"; do
+  [[ -n ${!var:-} ]] && present_vars+=("$var")
+done
+systemctl --user import-environment "${present_vars[@]}" 2>/dev/null
+dbus-update-activation-environment --systemd "${present_vars[@]}" 2>/dev/null
+
+echo "omarchy-server-session: serving $USER on $WAYLAND_DISPLAY${DISPLAY:+ and $DISPLAY}" >&2
+
+sleep infinity &
+children+=("$!")
+wait "$!"

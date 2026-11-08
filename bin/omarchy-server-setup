@@ -1,0 +1,62 @@
+#!/bin/bash
+
+# omarchy:summary=Turn this machine into an Omarchy server for thin clients
+# omarchy:requires-sudo=true
+
+# Every user's apps, files and processing live here; thin clients connect
+# over SSH and show the windows. Sets up:
+#   - waypipe, xwayland-satellite, the audio and camera tooling
+#   - sshd tuned for many multiplexed channels per client
+#   - fair sharing between users (CPU, IO, memory, tasks per user slice)
+#   - a private virtual webcam per user
+
+set -euo pipefail
+
+if (( EUID != 0 )); then
+  exec sudo "$0" "$@"
+fi
+
+echo "Installing server packages..."
+mapfile -t packages < <(grep -vE '^\s*(#|$)' "$OMARCHY_PATH/install/omarchy-server.packages")
+omarchy-pkg-add "${packages[@]}"
+
+install -d -m 755 /etc/omarchy-server
+touch /etc/omarchy-server/users
+
+install -d -m 755 /etc/ssh/sshd_config.d
+cat >/etc/ssh/sshd_config.d/50-omarchy-server.conf <<'CONF'
+# Omarchy server: one SSH connection per thin client carries every terminal,
+# app launch and media stream as a multiplexed channel.
+MaxSessions 128
+# waypipe and PulseAudio forwarding use Unix sockets.
+AllowStreamLocalForwarding yes
+StreamLocalBindUnlink yes
+# Notice dead clients within two minutes, and don't drop live ones on a blip.
+ClientAliveInterval 15
+ClientAliveCountMax 8
+CONF
+systemctl enable --now sshd
+systemctl reload sshd
+
+if omarchy-cmd-present ufw; then
+  ufw allow 22/tcp comment 'omarchy-server'
+fi
+
+# Fair share between users: equal CPU and IO weight, no user can push the
+# server into swap for everyone else, and a fork bomb stays one user's problem.
+install -d -m 755 /etc/systemd/system/user-.slice.d
+cat >/etc/systemd/system/user-.slice.d/50-omarchy-server.conf <<'CONF'
+[Slice]
+CPUWeight=100
+IOWeight=100
+MemoryHigh=70%
+MemoryMax=85%
+TasksMax=8192
+CONF
+systemctl daemon-reload
+
+omarchy-server-cameras --apply
+
+echo
+echo "The server is ready. Add each person who will connect with:"
+echo "  omarchy server user add <username>"

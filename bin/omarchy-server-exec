@@ -1,0 +1,23 @@
+#!/bin/bash
+
+# omarchy:summary=Run a thin client terminal's shell or command on the server
+# omarchy:args=[command] [args...]
+# omarchy:hidden=true
+
+# Apps started from this shell (nautilus ., chromium) show up on the thin
+# client, because the session's display is in the environment.
+
+env_file="$XDG_RUNTIME_DIR/omarchy-thin/env"
+if [[ -f $env_file ]]; then
+  set -a
+  source "$env_file"
+  set +a
+fi
+
+cd "$HOME" || exit 1
+
+if (($# == 0)); then
+  exec "${SHELL:-/bin/bash}" -l
+else
+  exec /bin/bash -lc 'exec "$@"' omarchy-thin "$@"
+fi

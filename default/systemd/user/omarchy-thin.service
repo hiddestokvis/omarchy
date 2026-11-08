@@ -1,0 +1,18 @@
+[Unit]
+Description=Omarchy thin client connection to the server
+# waypipe needs the compositor's WAYLAND_DISPLAY, which uwsm imports before
+# graphical-session.target.
+After=graphical-session.target
+PartOf=graphical-session.target
+ConditionEnvironment=WAYLAND_DISPLAY
+ConditionPathExists=%h/.config/omarchy/thin.conf
+
+[Service]
+Type=simple
+ExecStart=/usr/bin/omarchy-thin-connect
+ExecStartPost=-/usr/bin/omarchy-thin-sync-apps
+Restart=always
+RestartSec=2
+
+[Install]
+WantedBy=graphical-session.target

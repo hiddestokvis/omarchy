@@ -1,0 +1,12 @@
+[Unit]
+Description=Omarchy thin client camera shared with the server
+# Started and stopped by omarchy-thin-camera; never on its own, so the camera
+# is only live while the user has switched it on.
+After=omarchy-thin.service
+PartOf=omarchy-thin.service
+
+[Service]
+Type=simple
+ExecStart=/usr/bin/omarchy-thin-camera stream
+Restart=on-failure
+RestartSec=2

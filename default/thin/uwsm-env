@@ -1,0 +1,10 @@
+# Omarchy thin client session environment, linked into ~/.config/uwsm/env.d by
+# omarchy-thin-setup. Changes require a new login.
+
+export OMARCHY_THIN=1
+
+# Route app launches (uwsm-app and the app launchers) to the server.
+export PATH="${OMARCHY_PATH%/}/default/thin/bin:$PATH"
+
+# Launcher entries and icons for the server's apps, kept by omarchy-thin-sync-apps.
+export XDG_DATA_DIRS="$HOME/.local/share/omarchy-thin:${XDG_DATA_DIRS:-/usr/local/share:/usr/share}"

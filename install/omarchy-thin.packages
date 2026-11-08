@@ -1,0 +1,7 @@
+# Omarchy thin client (omarchy-thin-setup).
+openssh
+waypipe
+gst-plugins-base
+gst-plugins-good
+ffmpeg
+v4l-utils

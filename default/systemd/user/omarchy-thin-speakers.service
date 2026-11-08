@@ -1,0 +1,16 @@
+[Unit]
+Description=Omarchy thin client speakers
+After=omarchy-thin.service
+PartOf=omarchy-thin.service
+
+[Service]
+Type=simple
+ExecStart=/usr/bin/omarchy-thin-audio speakers
+Restart=always
+RestartSec=2
+# Audio is switched off in thin.conf.
+RestartPreventExitStatus=77
+SuccessExitStatus=77
+
+[Install]
+WantedBy=omarchy-thin.service

@@ -1,0 +1,13 @@
+[Unit]
+Description=Omarchy thin client notifications from server apps
+After=omarchy-thin.service
+PartOf=omarchy-thin.service
+
+[Service]
+Type=simple
+ExecStart=/usr/bin/omarchy-thin-notifications
+Restart=always
+RestartSec=2
+
+[Install]
+WantedBy=omarchy-thin.service

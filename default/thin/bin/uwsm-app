@@ -1,0 +1,70 @@
+#!/bin/bash
+
+# Thin client overlay for uwsm-app, first on PATH in a thin client session.
+# Every Omarchy launch goes through uwsm-app, so this is where an app is sent
+# to the server. Terminals stay on this device (text is the cheapest thing to
+# send) but the shell or command inside them runs on the server; Omarchy's own
+# UI and the tools that drive this device's hardware stay local.
+
+source "$OMARCHY_PATH/default/thin/client.sh"
+
+options=()
+while (($#)) && [[ $1 != "--" ]]; do
+  options+=("$1")
+  shift
+done
+[[ ${1:-} == "--" ]] && shift
+command=("$@")
+
+# The real uwsm-app: the next one on PATH after this overlay.
+real_uwsm_app() {
+  local self_dir directory
+  self_dir=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)
+
+  IFS=: read -ra directories <<<"$PATH"
+  for directory in "${directories[@]}"; do
+    [[ -n $directory && -d $directory ]] || continue
+    [[ $(cd -- "$directory" && pwd -P) == "$self_dir" ]] && continue
+    if [[ -x $directory/uwsm-app ]]; then
+      echo "$directory/uwsm-app"
+      return
+    fi
+  done
+  echo /usr/bin/uwsm-app
+}
+
+run_locally() {
+  exec "$(real_uwsm_app)" "${options[@]}" -- "${command[@]}"
+}
+
+if (( ${#command[@]} == 0 )) || ! thin_load_config 2>/dev/null; then
+  run_locally
+fi
+
+name=${command[0]##*/}
+
+if [[ $name == "xdg-terminal-exec" ]]; then
+  # Split xdg-terminal-exec's own options from the command it runs.
+  terminal=("${command[0]}")
+  rest=("${command[@]:1}")
+  while (( ${#rest[@]} )) && [[ ${rest[0]} == --* ]]; do
+    # The local cwd means nothing on the server.
+    [[ ${rest[0]} == --dir=* ]] || terminal+=("${rest[0]}")
+    rest=("${rest[@]:1}")
+  done
+  [[ ${rest[0]:-} == "-e" ]] && rest=("${rest[@]:1}")
+
+  if (( ${#rest[@]} == 0 )); then
+    if (( OMARCHY_THIN_LOCAL_SHELL )); then
+      run_locally
+    fi
+    command=("${terminal[@]}" -e omarchy-thin-exec)
+  elif [[ $(thin_command_location "$(thin_terminal_command_name "${rest[@]}")") == "remote" ]]; then
+    command=("${terminal[@]}" -e omarchy-thin-exec "${rest[@]}")
+  fi
+  run_locally
+elif [[ $(thin_command_location "$name") == "local" ]]; then
+  run_locally
+else
+  exec omarchy-thin-run "${command[@]}"
+fi

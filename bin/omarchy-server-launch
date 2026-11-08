@@ -1,0 +1,42 @@
+#!/bin/bash
+
+# omarchy:summary=Start an app in the caller's thin client session
+# omarchy:args=<command> [args...]
+# omarchy:hidden=true
+
+# Each app runs as its own transient unit under the user's app.slice, so it
+# outlives the SSH channel that asked for it and is accounted, limited and
+# listed like any other app on the server.
+
+set -uo pipefail
+
+env_file="$XDG_RUNTIME_DIR/omarchy-thin/env"
+
+if (($# == 0)); then
+  echo "Usage: omarchy-server-launch <command> [args...]" >&2
+  exit 1
+fi
+
+if [[ ! -f $env_file ]]; then
+  echo "omarchy-server-launch: no thin client session is connected for $USER" >&2
+  exit 1
+fi
+
+# systemd-run resolves the command with the caller's PATH, so take the session's.
+set -a
+source "$env_file"
+set +a
+
+name=${1##*/}
+name=${name//[^a-zA-Z0-9_.-]/_}
+
+cd "$HOME" || exit 1
+if systemd-run --user --quiet --collect --slice=app.slice \
+  --unit="omarchy-thin-$name-$RANDOM$RANDOM" \
+  --property=EnvironmentFile="$env_file" \
+  --working-directory="$HOME" -- "$@" 2>/dev/null; then
+  exit 0
+fi
+
+# No user manager to hand it to: start it detached from this channel instead.
+setsid -f "$@" >/dev/null 2>&1 </dev/null

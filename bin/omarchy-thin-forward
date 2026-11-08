@@ -1,0 +1,16 @@
+#!/bin/bash
+
+# omarchy:summary=Run an Omarchy app launcher on the server from a thin client
+# omarchy:args=<launcher> [args...]
+# omarchy:hidden=true
+
+# The thin client overlay links launchers that look up local browsers, desktop
+# entries or app installs here, so they run where the apps actually are.
+
+launcher=${0##*/}
+if [[ $launcher == "omarchy-thin-forward" ]]; then
+  launcher=${1:?Usage: omarchy-thin-forward <launcher> [args...]}
+  shift
+fi
+
+exec omarchy-thin-run "$launcher" "$@"

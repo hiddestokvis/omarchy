@@ -1,0 +1,21 @@
+#!/bin/bash
+
+# omarchy:summary=Run an app on the Omarchy server and show its windows here
+# omarchy:args=<command> [args...]
+# omarchy:examples=omarchy thin run chromium | omarchy thin run nautilus --new-window
+
+source "$OMARCHY_PATH/default/thin/client.sh"
+thin_load_config || exit 1
+
+if (($# == 0)); then
+  echo "Usage: omarchy-thin-run <command> [args...]" >&2
+  exit 1
+fi
+
+if ! thin_wait_connected 5; then
+  thin_notify_offline
+  echo "omarchy-thin-run: not connected to $OMARCHY_THIN_SERVER" >&2
+  exit 1
+fi
+
+thin_ssh -n -T "$OMARCHY_THIN_SERVER" -- omarchy-server-launch "$(thin_remote_command "$@")"
