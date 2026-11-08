@@ -1,9 +1,11 @@
 # Enable services only. Installs are followed by reboot, so don't start/reload
 # daemons mid-install. UFW and hardware-gated services stay in their own scripts.
-systemctl enable cups.service
+# Printing and Docker are absent from thin client images (omarchy-thin-base.packages),
+# where they run on the server.
+omarchy-pkg-present cups && systemctl enable cups.service
 systemctl enable avahi-daemon.service
 systemctl enable linux-modules-cleanup.service
-systemctl enable docker.socket
+omarchy-pkg-present docker && systemctl enable docker.socket
 systemctl enable systemd-resolved.service
 systemctl enable NetworkManager.service
 # Don't let network-online.target hold up graphical.target waiting for

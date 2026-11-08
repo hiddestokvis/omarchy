@@ -1,0 +1,74 @@
+#!/bin/bash
+
+# omarchy:summary=Set up this machine's thin client sign-in account and first-boot pairing
+# omarchy:args=[--first-install]
+# omarchy:hidden=true
+# omarchy:requires-sudo=true
+
+# Root, and safe in the ISO's install chroot (no running services needed).
+# Creates the unprivileged `thin` account the sign-in screen runs as, makes
+# SDDM log it in, and arms omarchy-thin-enroll for the next boot, which pairs
+# the device with its server on tty1 before the desktop starts.
+
+set -euo pipefail
+
+if (( EUID != 0 )); then
+  exec sudo "$0" "$@"
+fi
+
+OMARCHY_PATH=${OMARCHY_PATH:-/usr/share/omarchy}
+
+# No password, no sudo, nothing of anyone's: everything personal is on the server.
+if ! id thin >/dev/null 2>&1; then
+  useradd --create-home --shell /bin/bash --comment "Omarchy thin client" thin
+fi
+passwd --lock thin >/dev/null
+gpasswd --delete thin wheel >/dev/null 2>&1 || true
+usermod --append --groups video,audio,input thin
+
+install -d -m 755 /etc/omarchy-thin
+if [[ ! -f /etc/omarchy-thin/thin.conf ]]; then
+  install -m 644 "$OMARCHY_PATH/default/thin/thin.conf" /etc/omarchy-thin/thin.conf
+fi
+
+# Boot straight into the sign-in screen.
+install -d -m 755 /etc/sddm.conf.d
+printf '[Autologin]\nUser=thin\nSession=omarchy.desktop\nRelogin=true\n' >/etc/sddm.conf.d/autologin.conf
+if [[ -d /var/lib/sddm ]]; then
+  printf '[Last]\nSession=omarchy.desktop\nUser=thin\n' >/var/lib/sddm/state.conf
+  chown sddm:sddm /var/lib/sddm/state.conf 2>/dev/null || true
+fi
+
+home=$(getent passwd thin | cut -d: -f6)
+as_thin() {
+  runuser -u thin -- env HOME="$home" OMARCHY_PATH="$OMARCHY_PATH" OMARCHY_SETUP_CONTEXT="${OMARCHY_SETUP_CONTEXT:-runtime}" "$@"
+}
+
+as_thin mkdir -p "$home/.config/uwsm/env.d" "$home/.config/systemd/user/graphical-session.target.wants"
+as_thin ln -sfn "$OMARCHY_PATH/default/thin/uwsm-env" "$home/.config/uwsm/env.d/50-omarchy-thin"
+
+for unit in omarchy-thin-greeter.service omarchy-thin-session.target omarchy-thin-display.service \
+  omarchy-thin-speakers.service omarchy-thin-mic.service omarchy-thin-notifications.service omarchy-thin-camera.service; do
+  if [[ ! -f /usr/lib/systemd/user/$unit ]]; then
+    as_thin ln -sfn "$OMARCHY_PATH/default/systemd/user/$unit" "$home/.config/systemd/user/$unit"
+  fi
+done
+greeter=/usr/lib/systemd/user/omarchy-thin-greeter.service
+[[ -f $greeter ]] || greeter="$home/.config/systemd/user/omarchy-thin-greeter.service"
+as_thin ln -sfn "$greeter" "$home/.config/systemd/user/graphical-session.target.wants/omarchy-thin-greeter.service"
+
+if [[ $* == *--first-install* ]]; then
+  as_thin omarchy-provision-user --first-install ||
+    echo "Finish the thin account's setup later with: sudo -u thin omarchy finalize user" >&2
+else
+  as_thin omarchy-provision-user ||
+    echo "Finish the thin account's setup later with: sudo -u thin omarchy finalize user" >&2
+fi
+
+# Pair with the server on the next boot, unless already paired.
+if [[ ! -f /etc/omarchy-thin/device_key ]]; then
+  install -d -m 700 /var/lib/omarchy-thin
+  touch /var/lib/omarchy-thin/enroll-pending
+  install -m 644 "$OMARCHY_PATH/default/systemd/system/omarchy-thin-enroll.service" /etc/systemd/system/
+  systemctl enable omarchy-thin-enroll.service
+fi

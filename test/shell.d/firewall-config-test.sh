@@ -40,12 +40,26 @@ cat >"$stub_dir/systemctl" <<'STUB'
 printf 'systemctl %s\n' "$*" >>"$TEST_LOG"
 STUB
 
+# Thin client images leave Docker out; the stub answers from $INSTALLED.
+cat >"$stub_dir/omarchy-pkg-present" <<'STUB'
+#!/bin/bash
+[[ " $INSTALLED " == *" $1 "* ]]
+STUB
+
 chmod +x "$stub_dir"/*
 
 export TEST_LOG="$stub_dir/firewall.log"
-PATH="$stub_dir:$PATH" bash -eE -c 'source "$1"' bash "$ROOT/install/config/firewall.sh"
+INSTALLED="ufw ufw-docker" PATH="$stub_dir:$PATH" bash -eE -c 'source "$1"' bash "$ROOT/install/config/firewall.sh"
 
 grep -q '^ufw-docker install$' "$TEST_LOG" || fail "ufw-docker rules are installed"
 grep -q '^systemctl enable ufw$' "$TEST_LOG" || fail "ufw is enabled for next boot"
 
 pass "firewall config installs ufw-docker rules without activating live UFW"
+
+: >"$TEST_LOG"
+INSTALLED="ufw" PATH="$stub_dir:$PATH" bash -eE -c 'source "$1"' bash "$ROOT/install/config/firewall.sh" ||
+  fail "firewall config finishes on a thin client image without Docker"
+grep -q '^ufw-docker' "$TEST_LOG" && fail "ufw-docker is not run when it is not installed"
+grep -q '^systemctl enable ufw$' "$TEST_LOG" || fail "ufw is still enabled without Docker"
+
+pass "firewall config skips the Docker rules on images without Docker"

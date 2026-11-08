@@ -18,7 +18,19 @@ wprs's wire protocol is not stable between builds, so the server and every thin 
 
 ## The device: an appliance
 
-`omarchy-thin-install` turns an Omarchy install into a thin client:
+There are two ways to make a thin client:
+
+- **The thin client ISO.** The omarchy-iso repo's `omarchy-iso-make --thin` builds it from `install/omarchy-thin-base.packages` instead of `omarchy-base.packages`. The ISO installs that much smaller set and then runs `omarchy-thin-provision --first-install` in the target.
+- **A regular install.** `omarchy-thin-install` installs `install/omarchy-thin.packages`, removes `install/omarchy-thin-slim.packages`, then runs the same two steps by hand.
+
+Both end in the same two steps:
+
+- `omarchy-thin-provision` (root, chroot-safe) creates the `thin` account and its SDDM autologin, links the user units, and arms `omarchy-thin-enroll.service` with `/var/lib/omarchy-thin/enroll-pending`.
+- `omarchy-thin-enroll` (root, on tty1 at first boot, like `omarchy-provision-owner`) brings up a network, pins the server host key after the fingerprint check, enrolls the device key through a server admin's sudo, and fetches the server's wprs build if the device lacks it.
+
+Setup leaves that need packages the thin set leaves out (cups, Docker, mise, Chromium) skip themselves when those packages are absent.
+
+The result:
 
 - `/etc/omarchy-thin/`: `thin.conf` (server address and media settings), `known_hosts` (the server host key, pinned under the alias `omarchy-server` after the admin confirms the fingerprint), and `device_key` (this device's enrollment key, readable only by `thin`).
 - An unprivileged, passwordless, sudo-less `thin` account that SDDM logs in automatically. Its uwsm environment (`default/thin/uwsm-env`) sets `OMARCHY_THIN=1`, puts `default/thin/bin` first on `PATH`, and puts `~/.local/share/omarchy-thin` first on `XDG_DATA_DIRS`.

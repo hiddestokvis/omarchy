@@ -60,17 +60,28 @@ Signing in takes two things: a device the server knows, and the person's passwor
 
 ## Setting up a thin client
 
-Install Omarchy on the device, with disk encryption on. Then, signed in as the admin account you created during install, run:
+### From the thin client ISO (recommended)
+
+The thin client ISO installs only what a thin client needs: the desktop, terminals, fonts and hardware support, without any apps. It's a fraction of the size of the full Omarchy ISO, and installs much faster on old machines.
+
+1. Write the thin client ISO to a USB stick and boot the device from it, as you would for Omarchy.
+2. Answer the installer's questions. Keep disk encryption on. The account you create is the device's admin account, for maintenance; people sign in with their server accounts.
+3. On the first boot, before the desktop starts, the device asks for:
+   - a network, offering Wi-Fi setup if there's no cable
+   - the server's address, and to compare its fingerprint with what `ssh-keygen -lf /etc/ssh/ssh_host_ed25519_key.pub` shows on the server
+   - a name for the device, and a server admin account, whose password and sudo enroll the device
+
+Then the sign-in screen appears, and the device is ready. To pair it with another server later, run `omarchy thin enroll` from the admin account.
+
+### From a regular Omarchy install
+
+A machine already running Omarchy converts with one command, as its admin account:
 
 ```bash
 omarchy thin install studio.local
 ```
 
-1. It shows the server's fingerprint. On the server, run `ssh-keygen -lf /etc/ssh/ssh_host_ed25519_key.pub` and check that they match. This is what makes sure the device only ever talks to your server.
-2. It asks for a server admin's password, to enroll the device. Use `--admin <name>` if your admin account there has a different name, and `--name <name>` to give the device a name of its own.
-3. It removes the big desktop apps (they run on the server now) and makes the machine start at the sign-in screen. Add `--keep-apps` to keep them.
-
-Reboot, and the device is a thin client. Its admin account still works: switch to another console with `Ctrl + Alt + F3`, or SSH in.
+It removes the big desktop apps (add `--keep-apps` to keep them), sets up the sign-in screen, and runs the same pairing as the ISO's first boot. Reboot, and the device is a thin client. Its admin account still works: switch to another console with `Ctrl + Alt + F3`, or SSH in.
 
 ### Old machines
 

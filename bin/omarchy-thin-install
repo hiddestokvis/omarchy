@@ -5,13 +5,10 @@
 # omarchy:examples=omarchy thin install studio.local | omarchy thin install 10.0.0.5 --name kitchen-imac --admin hidde
 
 # Run once, as the admin account of a fresh Omarchy install (with disk
-# encryption on). Afterwards the machine boots straight to a sign-in screen
-# for the server, and whoever signs in gets their own persistent desktop.
-#
-#   - pins the server's identity (host key), after you confirm its fingerprint
-#   - enrolls the device on the server, using a server admin's sudo
-#   - installs the server's wprs build, removes local desktop apps
-#   - creates the unprivileged local `thin` account that the sign-in screen runs as
+# encryption on). The thin client ISO does the same at install time with far
+# fewer packages; this converts a regular install. Afterwards the machine boots
+# straight to a sign-in screen for the server, and whoever signs in gets their
+# own persistent desktop.
 
 set -euo pipefail
 
@@ -30,9 +27,6 @@ while (($#)); do
   esac
 done
 
-if [[ -z $server ]]; then
-  server=$(gum input --placeholder "studio.local" --prompt "Omarchy server address: ")
-fi
 if (( EUID == 0 )); then
   echo "Run omarchy-thin-install as this machine's admin user; it asks for sudo." >&2
   exit 1
@@ -44,44 +38,9 @@ if ! lsblk -s -no TYPE "$root_source" 2>/dev/null | grep -qx crypt; then
   gum confirm "Continue anyway?" || exit 1
 fi
 
-work=$(mktemp -d)
-trap 'rm -rf "$work"' EXIT
-
 echo "Installing thin client packages..."
 mapfile -t packages < <(grep -vE '^\s*(#|$)' "$OMARCHY_PATH/install/omarchy-thin.packages")
 omarchy-pkg-add "${packages[@]}"
-
-echo "Checking the server's identity..."
-if ! ssh-keyscan -p "$port" -t ed25519 "$server" 2>/dev/null | awk '{ $1 = "omarchy-server"; print }' >"$work/known_hosts" ||
-  [[ ! -s $work/known_hosts ]]; then
-  echo "Can't reach $server on port $port." >&2
-  exit 1
-fi
-fingerprint=$(ssh-keygen -lf "$work/known_hosts" | awk '{ print $2 }')
-echo
-echo "The server says its fingerprint is:"
-echo "  $fingerprint"
-echo "Compare it with what this shows on the server:"
-echo "  ssh-keygen -lf /etc/ssh/ssh_host_ed25519_key.pub"
-gum confirm "Do they match?" || {
-  echo "Stopped. A mismatch means you may not be talking to your server." >&2
-  exit 1
-}
-
-admin_ssh=(-p "$port" -o UserKnownHostsFile="$work/known_hosts" -o HostKeyAlias=omarchy-server -o StrictHostKeyChecking=yes)
-
-ssh-keygen -q -t ed25519 -N "" -C "omarchy-thin:$name" -f "$work/device_key"
-echo "Enrolling $name on the server (as $admin, who needs sudo there)..."
-ssh -t "${admin_ssh[@]}" "$admin@$server" sudo omarchy-server-device add "$(printf '%q' "$name")" "'$(cut -d' ' -f1,2 "$work/device_key.pub")'"
-
-echo "Installing wprs..."
-if omarchy-hw-x86; then arch=x86_64; else arch=aarch64; fi
-if scp -q -P "$port" -o UserKnownHostsFile="$work/known_hosts" -o HostKeyAlias=omarchy-server -o StrictHostKeyChecking=yes "$admin@$server:/var/lib/omarchy-server/packages/omarchy-wprs-*-$arch.pkg.tar.zst" "$work/" 2>/dev/null; then
-  sudo pacman -U --noconfirm "$work"/omarchy-wprs-*.pkg.tar.zst
-else
-  echo "The server has no $arch build of wprs; building it here (this takes a while on older machines)..."
-  omarchy-server-wprs-build
-fi
 
 if (( ! keep_apps )); then
   mapfile -t heavy < <(grep -vE '^\s*(#|$)' "$OMARCHY_PATH/install/omarchy-thin-slim.packages")
@@ -95,55 +54,9 @@ if (( ! keep_apps )); then
   fi
 fi
 
-sudo bash -s "$OMARCHY_PATH" "$work" "$server" "$port" <<'ROOT'
-set -euo pipefail
-OMARCHY_PATH=$1 work=$2 server=$3 port=$4
-
-# The account the sign-in screen runs as: no password, no sudo, no files of
-# anyone's. Everything personal lives on the server.
-if ! id thin >/dev/null 2>&1; then
-  useradd --create-home --shell /bin/bash --comment "Omarchy thin client" thin
-fi
-passwd --lock thin >/dev/null
-gpasswd --delete thin wheel >/dev/null 2>&1 || true
-usermod --append --groups video,audio,input thin
-
-install -d -m 755 /etc/omarchy-thin
-install -m 644 "$work/known_hosts" /etc/omarchy-thin/known_hosts
-install -m 600 -o thin -g thin "$work/device_key" /etc/omarchy-thin/device_key
-install -m 644 "$work/device_key.pub" /etc/omarchy-thin/device_key.pub
-if [[ ! -f /etc/omarchy-thin/thin.conf ]]; then
-  install -m 644 "$OMARCHY_PATH/default/thin/thin.conf" /etc/omarchy-thin/thin.conf
-fi
-sed -i -e "s|^OMARCHY_THIN_SERVER=.*|OMARCHY_THIN_SERVER=\"$server\"|" \
-  -e "s|^OMARCHY_THIN_PORT=.*|OMARCHY_THIN_PORT=$port|" /etc/omarchy-thin/thin.conf
-
-# Boot straight into the sign-in screen.
-install -d -m 755 /etc/sddm.conf.d
-printf '[Autologin]\nUser=thin\nSession=omarchy.desktop\nRelogin=true\n' >/etc/sddm.conf.d/autologin.conf
-
-home=$(getent passwd thin | cut -d: -f6)
-as_thin() {
-  runuser -u thin -- env HOME="$home" OMARCHY_PATH="$OMARCHY_PATH" "$@"
-}
-
-as_thin mkdir -p "$home/.config/uwsm/env.d" "$home/.config/systemd/user/graphical-session.target.wants"
-as_thin ln -sfn "$OMARCHY_PATH/default/thin/uwsm-env" "$home/.config/uwsm/env.d/50-omarchy-thin"
-
-for unit in omarchy-thin-greeter.service omarchy-thin-session.target omarchy-thin-display.service \
-  omarchy-thin-speakers.service omarchy-thin-mic.service omarchy-thin-notifications.service omarchy-thin-camera.service; do
-  if [[ ! -f /usr/lib/systemd/user/$unit ]]; then
-    as_thin ln -sfn "$OMARCHY_PATH/default/systemd/user/$unit" "$home/.config/systemd/user/$unit"
-  fi
-done
-greeter=/usr/lib/systemd/user/omarchy-thin-greeter.service
-[[ -f $greeter ]] || greeter="$home/.config/systemd/user/omarchy-thin-greeter.service"
-as_thin ln -sfn "$greeter" "$home/.config/systemd/user/graphical-session.target.wants/omarchy-thin-greeter.service"
-
-as_thin omarchy-provision-user || echo "Finish the thin account's setup later with: sudo -u thin omarchy finalize user" >&2
-ROOT
+sudo omarchy-thin-provision
+sudo omarchy-thin-enroll ${server:+--server "$server"} --port "$port" --name "$name" --admin "$admin"
 
 echo
-echo "This machine is now a thin client of $server."
-echo "Reboot, and it starts at the sign-in screen."
-echo "Admin access stays available on another TTY (Ctrl + Alt + F3) and over SSH."
+echo "This machine is now a thin client. Reboot, and it starts at the sign-in screen."
+echo "Admin access stays available on another console (Ctrl + Alt + F3) and over SSH."

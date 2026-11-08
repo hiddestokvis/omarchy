@@ -46,7 +46,10 @@ EOF
   return "$status"
 }
 
-install_ufw_docker_rules
+# Thin client images have no Docker (omarchy-thin-base.packages).
+if omarchy-pkg-present ufw-docker; then
+  install_ufw_docker_rules
+fi
 
 # Installs are followed by reboot, so configure UFW to start on the installed
 # system instead of mutating the live install session's firewall.

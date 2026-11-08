@@ -1,0 +1,149 @@
+#!/bin/bash
+
+# omarchy:summary=Pair this thin client with its Omarchy server
+# omarchy:args=[--first-boot] [--server <address>] [--port <port>] [--name <device-name>] [--admin <server-admin>]
+# omarchy:requires-sudo=true
+
+# On a thin client ISO install this runs once on first boot, on tty1 before
+# the desktop starts (omarchy-thin-enroll.service). Run it again any time to
+# pair the device with a different server.
+#
+#   1. make sure there is a network (offers nmtui for Wi-Fi)
+#   2. pin the server's identity after you compare its fingerprint
+#   3. enroll this device's key on the server, with a server admin's sudo
+#   4. make sure this device runs the server's wprs build
+
+set -uo pipefail
+
+if (( EUID != 0 )); then
+  exec sudo "$0" "$@"
+fi
+
+OMARCHY_PATH=${OMARCHY_PATH:-/usr/share/omarchy}
+export OMARCHY_PATH
+
+first_boot=0 server="" port="" name="" admin=""
+while (($#)); do
+  case $1 in
+  --first-boot) first_boot=1; shift ;;
+  --server) server=$2; shift 2 ;;
+  --port) port=$2; shift 2 ;;
+  --name) name=$2; shift 2 ;;
+  --admin) admin=$2; shift 2 ;;
+  *) shift ;;
+  esac
+done
+
+source /etc/omarchy-thin/thin.conf 2>/dev/null || true
+server=${server:-${OMARCHY_THIN_SERVER:-}}
+port=${port:-${OMARCHY_THIN_PORT:-22}}
+name=${name:-$(hostname)}
+
+work=$(mktemp -d)
+trap 'rm -rf "$work"' EXIT
+
+heading() {
+  clear
+  omarchy-show-logo 2>/dev/null || true
+  echo
+  gum style --bold "Set up this thin client"
+  [[ -n ${1:-} ]] && gum style --foreground 1 "$1"
+  echo
+}
+
+network_up() {
+  [[ $(nmcli -t -f CONNECTIVITY general 2>/dev/null) == "full" || $(nmcli -t -f CONNECTIVITY general 2>/dev/null) == "limited" ]]
+}
+
+choose_or_quit() {
+  local choice
+  choice=$(gum choose "$@" "Shut down") || choice="Shut down"
+  if [[ $choice == "Shut down" ]]; then
+    systemctl poweroff
+    exit 1
+  fi
+  echo "$choice"
+}
+
+message=""
+while true; do
+  heading "$message"
+  message=""
+
+  if ! network_up; then
+    gum style "This device needs a network to reach its server."
+    if [[ $(choose_or_quit "Set up Wi-Fi" "Try again") == "Set up Wi-Fi" ]]; then
+      nmtui-connect
+    fi
+    continue
+  fi
+
+  server=$(gum input --value "$server" --placeholder "studio.local" --prompt "Omarchy server: ") || continue
+  [[ -n $server ]] || { message="Enter the server's address."; continue; }
+  port=$(gum input --value "$port" --prompt "SSH port: ") || continue
+  [[ $port =~ ^[0-9]+$ ]] || { message="The port is a number, usually 22."; continue; }
+
+  if ! ssh-keyscan -T 10 -p "$port" -t ed25519 "$server" 2>/dev/null | awk '{ $1 = "omarchy-server"; print }' >"$work/known_hosts" ||
+    [[ ! -s $work/known_hosts ]]; then
+    message="Can't reach $server on port $port."
+    continue
+  fi
+
+  fingerprint=$(ssh-keygen -lf "$work/known_hosts" | awk '{ print $2 }')
+  heading
+  gum style "The server says its fingerprint is:" "" "  $fingerprint" "" \
+    "On the server, check it shows the same with:" "" "  ssh-keygen -lf /etc/ssh/ssh_host_ed25519_key.pub"
+  echo
+  if ! gum confirm "Do they match?"; then
+    message="Not paired. A different fingerprint means this may not be your server."
+    continue
+  fi
+
+  name=$(gum input --value "$name" --prompt "Name for this device: ") || continue
+  [[ $name =~ ^[A-Za-z0-9._-]{1,64}$ ]] || { message="Device names use letters, digits, dot, dash and underscore."; continue; }
+  admin=$(gum input --value "$admin" --placeholder "admin" --prompt "Server admin account: ") || continue
+  [[ $admin =~ ^[a-z_][a-z0-9_-]{0,31}$ ]] || { message="Enter the username of an admin on the server."; continue; }
+
+  rm -f "$work/device_key" "$work/device_key.pub"
+  ssh-keygen -q -t ed25519 -N "" -C "omarchy-thin:$name" -f "$work/device_key"
+
+  admin_ssh=(-F none -p "$port" -o UserKnownHostsFile="$work/known_hosts" -o HostKeyAlias=omarchy-server -o StrictHostKeyChecking=yes)
+  echo
+  gum style "Signing in to $server as $admin. You'll be asked for $admin's password, then for sudo."
+  if ! ssh -t "${admin_ssh[@]}" "$admin@$server" \
+    sudo omarchy-server-device add "$(printf '%q' "$name")" "'$(cut -d' ' -f1,2 "$work/device_key.pub")'"; then
+    message="The server didn't accept the device. Check the admin account and that the server ran 'omarchy server setup'."
+    continue
+  fi
+
+  if ! pacman -Q omarchy-wprs >/dev/null 2>&1; then
+    if omarchy-hw-x86; then arch=x86_64; else arch=aarch64; fi
+    gum style "Fetching the server's display software..."
+    if scp -q -P "$port" -F none -o UserKnownHostsFile="$work/known_hosts" -o HostKeyAlias=omarchy-server \
+      -o StrictHostKeyChecking=yes "$admin@$server:/var/lib/omarchy-server/packages/omarchy-wprs-*-$arch.pkg.tar.zst" "$work/"; then
+      pacman -U --noconfirm "$work"/omarchy-wprs-*.pkg.tar.zst
+    else
+      gum style --foreground 3 "The server has no $arch build. After setup, build it here with: omarchy-server-wprs-build"
+      sleep 5
+    fi
+  fi
+
+  install -d -m 755 /etc/omarchy-thin
+  install -m 644 "$work/known_hosts" /etc/omarchy-thin/known_hosts
+  install -m 600 -o thin -g thin "$work/device_key" /etc/omarchy-thin/device_key
+  install -m 644 "$work/device_key.pub" /etc/omarchy-thin/device_key.pub
+  [[ -f /etc/omarchy-thin/thin.conf ]] || install -m 644 "$OMARCHY_PATH/default/thin/thin.conf" /etc/omarchy-thin/thin.conf
+  sed -i -e "s|^OMARCHY_THIN_SERVER=.*|OMARCHY_THIN_SERVER=\"$server\"|" \
+    -e "s|^OMARCHY_THIN_PORT=.*|OMARCHY_THIN_PORT=$port|" /etc/omarchy-thin/thin.conf
+
+  rm -f /var/lib/omarchy-thin/enroll-pending
+  systemctl disable omarchy-thin-enroll.service >/dev/null 2>&1 || true
+
+  heading
+  gum style --bold "Paired with $server as $name."
+  if (( first_boot )); then
+    gum style "Starting the sign-in screen..."
+    sleep 2
+  fi
+  exit 0
+done

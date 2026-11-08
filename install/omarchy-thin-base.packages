@@ -1,0 +1,119 @@
+# The whole package set of an Omarchy thin client ISO, in place of
+# omarchy-base.packages. A thin client draws the desktop and drives its own
+# hardware; every app runs on the Omarchy server. So it keeps the compositor,
+# the Omarchy shell and its helpers, terminals, fonts, and hardware support,
+# and leaves out every desktop app, developer tool and service.
+# omarchy-other.packages (firmware and drivers picked per machine) still applies.
+
+# Desktop and session
+hyprland
+hyprland-guiutils
+hyprpicker
+hyprsunset
+omarchy-hyprland-titlebars
+quickshell
+qt6-base
+qt6-declarative
+qt6-multimedia
+qt6-svg
+qt6-wayland
+qt6-imageformats
+uwsm
+sddm
+plymouth
+xdg-desktop-portal-gtk
+xdg-desktop-portal-hyprland
+xdg-terminal-exec
+xorg-xsetroot
+gnome-keyring
+gnome-themes-extra
+libsecret
+yaru-icon-theme
+omarchy-screensaver
+omarchy-power-profiles-daemon
+owe
+
+# The terminal, and what Omarchy's scripts and shell call
+foot
+gum
+jq
+socat
+inotify-tools
+wl-clipboard
+wtype
+grim
+slurp
+omasnap
+imagemagick
+libvips
+qrencode
+less
+vi
+nvim
+bash-completion
+starship
+fzf
+ripgrep
+bat
+eza
+fd
+zoxide
+tmux
+fastfetch
+unzip
+expac
+pacman-contrib
+inetutils
+inxi
+python-gobject
+libyaml
+lua51
+luarocks
+
+# Fonts for the shell and terminals (apps render their own text on the server)
+fontconfig
+noto-fonts
+noto-fonts-emoji
+ttf-jetbrains-mono-nerd-basic
+ttf-ia-writer
+woff2-font-awesome
+
+# Input methods: the framework only; language engines run where apps run
+fcitx5
+fcitx5-gtk
+fcitx5-qt
+
+# Audio, display and input hardware of this device
+pipewire
+wireplumber
+rtkit
+alsa-utils
+pamixer
+brightnessctl
+ddcutil
+asdcontrol
+bluez
+bluez-tools
+bluez-utils
+bolt
+
+# Network
+networkmanager
+avahi
+nss-mdns
+wireless-regdb
+ufw
+tzupdate
+
+# Thin client streams: SSH to the server, Opus audio, the camera, the display
+openssh
+gst-plugins-base
+gst-plugins-good
+ffmpeg
+v4l-utils
+omarchy-wprs
+
+# Disks
+dosfstools
+exfatprogs
+kernel-modules-hook

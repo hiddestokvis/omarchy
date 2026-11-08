@@ -125,7 +125,10 @@ done
 source "$OMARCHY_INSTALL/user/all.sh"
 
 omarchy-refresh-applications
-env -u BROWSER XDG_CURRENT_DESKTOP= xdg-settings set default-web-browser chromium.desktop
+# On a thin client Chromium lives on the server and its entry only appears once
+# someone signs in, so the default still points at it but may not verify yet.
+env -u BROWSER XDG_CURRENT_DESKTOP= xdg-settings set default-web-browser chromium.desktop ||
+  xdg-mime default chromium.desktop x-scheme-handler/http x-scheme-handler/https text/html
 xdg-mime default HEY.desktop x-scheme-handler/mailto
 
 if (( first_install )); then

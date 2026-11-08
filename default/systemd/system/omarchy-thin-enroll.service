@@ -1,0 +1,28 @@
+# First-boot pairing of a thin client with its Omarchy server, on tty1 before
+# SDDM starts. Armed by /var/lib/omarchy-thin/enroll-pending, written by
+# omarchy-thin-provision (thin client ISO installs and omarchy-thin-install).
+# Mirrors omarchy-provision-owner.service.
+[Unit]
+Description=Omarchy thin client pairing
+ConditionPathExists=/var/lib/omarchy-thin/enroll-pending
+ConditionPathExists=!/var/lib/omarchy/provisioning/pending
+After=systemd-user-sessions.service network.target NetworkManager.service omarchy-provision-owner.service
+Wants=NetworkManager.service
+Before=display-manager.service getty@tty1.service
+Conflicts=getty@tty1.service
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStartPre=-/usr/bin/plymouth quit
+ExecStart=/usr/bin/omarchy-thin-enroll --first-boot
+StandardInput=tty
+StandardOutput=tty
+StandardError=tty
+TTYPath=/dev/tty1
+TTYReset=yes
+TTYVHangup=yes
+TTYVTDisallocate=yes
+
+[Install]
+WantedBy=multi-user.target
