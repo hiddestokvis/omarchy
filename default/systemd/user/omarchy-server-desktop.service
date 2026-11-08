@@ -1,0 +1,13 @@
+[Unit]
+Description=Omarchy persistent desktop for thin clients
+# Started by omarchy-server-desktop attach when someone signs in on a thin
+# client. Lingering keeps it, and every app on it, running with no device
+# attached, until the person signs out.
+After=pipewire.service pipewire-pulse.service wireplumber.service
+Wants=pipewire.service pipewire-pulse.service wireplumber.service
+
+[Service]
+Type=simple
+ExecStart=/usr/bin/omarchy-server-desktop run
+Restart=on-failure
+RestartSec=2

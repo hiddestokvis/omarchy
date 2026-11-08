@@ -1,0 +1,11 @@
+#!/bin/bash
+
+# omarchy:summary=Close all your apps on the Omarchy server and sign out
+
+source "$OMARCHY_PATH/default/thin/client.sh"
+thin_load_config || exit 1
+
+if thin_connected; then
+  thin_ssh -n -T "$OMARCHY_THIN_DESTINATION" -- omarchy-server-desktop end
+fi
+omarchy-thin-logout "You signed out."

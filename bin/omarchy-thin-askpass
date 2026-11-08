@@ -1,0 +1,10 @@
+#!/bin/bash
+
+# omarchy:summary=Answer SSH's password prompt during thin client sign-in
+# omarchy:hidden=true
+
+# SSH runs this as SSH_ASKPASS. The password sits in a 0600 file on the
+# runtime tmpfs only for the seconds sign-in takes; the greeter removes it.
+
+[[ -n ${OMARCHY_THIN_ASKPASS_FILE:-} && -f $OMARCHY_THIN_ASKPASS_FILE ]] || exit 1
+cat "$OMARCHY_THIN_ASKPASS_FILE"

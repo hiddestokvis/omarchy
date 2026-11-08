@@ -18,7 +18,7 @@ if (($# == 0)); then
 fi
 
 if [[ ! -f $env_file ]]; then
-  echo "omarchy-server-launch: no thin client session is connected for $USER" >&2
+  echo "omarchy-server-launch: the desktop of $USER is not running" >&2
   exit 1
 fi
 
@@ -32,7 +32,7 @@ name=${name//[^a-zA-Z0-9_.-]/_}
 
 cd "$HOME" || exit 1
 if systemd-run --user --quiet --collect --slice=app.slice \
-  --unit="omarchy-thin-$name-$RANDOM$RANDOM" \
+  --unit="omarchy-thin-app-$name-$RANDOM$RANDOM" \
   --property=EnvironmentFile="$env_file" \
   --working-directory="$HOME" -- "$@" 2>/dev/null; then
   exit 0

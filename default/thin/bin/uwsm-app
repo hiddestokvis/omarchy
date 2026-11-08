@@ -55,9 +55,6 @@ if [[ $name == "xdg-terminal-exec" ]]; then
   [[ ${rest[0]:-} == "-e" ]] && rest=("${rest[@]:1}")
 
   if (( ${#rest[@]} == 0 )); then
-    if (( OMARCHY_THIN_LOCAL_SHELL )); then
-      run_locally
-    fi
     command=("${terminal[@]}" -e omarchy-thin-exec)
   elif [[ $(thin_command_location "$(thin_terminal_command_name "${rest[@]}")") == "remote" ]]; then
     command=("${terminal[@]}" -e omarchy-thin-exec "${rest[@]}")

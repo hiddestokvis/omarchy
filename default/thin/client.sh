@@ -1,11 +1,13 @@
 # Shared helpers for the omarchy-thin-* commands. Sourced, not executed.
 #
-# Every thin client stream rides one SSH connection: omarchy-thin-connect opens
-# it through waypipe as the ControlMaster, and terminals, app launches, audio,
-# camera and notifications are extra channels multiplexed over it. One TCP
-# connection, one key exchange, and nothing to reconnect per app.
+# A thin client is an appliance: the local `thin` account logs in on its own
+# and shows the sign-in screen, and whoever signs in gets their persistent
+# desktop from the Omarchy server. Every stream rides one SSH connection,
+# opened at sign-in as the ControlMaster: the wprs display, terminals, app
+# launches, audio, camera and notifications are channels multiplexed over it.
 
-OMARCHY_THIN_CONFIG="${XDG_CONFIG_HOME:-$HOME/.config}/omarchy/thin.conf"
+OMARCHY_THIN_ETC=${OMARCHY_THIN_ETC:-/etc/omarchy-thin}
+OMARCHY_THIN_CONFIG="$OMARCHY_THIN_ETC/thin.conf"
 OMARCHY_THIN_STATE="${XDG_RUNTIME_DIR:-/run/user/$UID}/omarchy-thin"
 OMARCHY_THIN_CONTROL="$OMARCHY_THIN_STATE/ssh.sock"
 
@@ -17,7 +19,7 @@ OMARCHY_THIN_LOCAL_DEFAULTS=(
   quickshell qs walker
   wiremix pavucontrol impala nmtui nm-connection-editor bluetui blueberry blueman-manager
   wl-copy wl-paste grim slurp satty
-  ssh waypipe
+  ssh wprsc
 )
 
 # Omarchy commands that act on the server: installing apps and web apps there.
@@ -25,15 +27,13 @@ OMARCHY_THIN_REMOTE_DEFAULTS=(
   "omarchy-install-*" "omarchy-pkg-*" "omarchy-webapp-*" "omarchy-tui-*" "omarchy-remove-*"
 )
 
+# Loads the device settings. Returns 1 when the device is not a thin client.
 thin_load_config() {
   OMARCHY_THIN_SERVER=""
   OMARCHY_THIN_PORT=22
-  OMARCHY_THIN_REMOTE_RUNTIME=""
-  OMARCHY_THIN_COMPRESS="zstd=7"
-  OMARCHY_THIN_GPU=0
-  OMARCHY_THIN_AUDIO=opus
   OMARCHY_THIN_SPEAKER_BITRATE=96000
   OMARCHY_THIN_MIC_BITRATE=32000
+  OMARCHY_THIN_AUDIO=opus
   OMARCHY_THIN_CAMERA_DEVICE=/dev/video0
   OMARCHY_THIN_CAMERA_SIZE=1280x720
   OMARCHY_THIN_CAMERA_FPS=30
@@ -41,29 +41,43 @@ thin_load_config() {
   OMARCHY_THIN_CAMERA_ENCODER=auto
   OMARCHY_THIN_LOCAL_APPS=()
   OMARCHY_THIN_REMOTE_APPS=()
-  OMARCHY_THIN_LOCAL_SHELL=0
 
   if [[ -f $OMARCHY_THIN_CONFIG ]]; then
     source "$OMARCHY_THIN_CONFIG"
   fi
 
   if [[ -z $OMARCHY_THIN_SERVER ]]; then
-    echo "No Omarchy server configured. Run: omarchy thin setup <user@server>" >&2
+    echo "This device is not a thin client. Set it up with: omarchy thin install <server>" >&2
     return 1
   fi
 
+  # The server account is only known once someone has signed in.
+  OMARCHY_THIN_USER=""
+  if [[ -f $OMARCHY_THIN_STATE/user ]]; then
+    read -r OMARCHY_THIN_USER <"$OMARCHY_THIN_STATE/user"
+  fi
+  OMARCHY_THIN_DESTINATION="${OMARCHY_THIN_USER:-nobody}@$OMARCHY_THIN_SERVER"
+
   OMARCHY_THIN_SSH_OPTS=(
+    -F none
     -p "$OMARCHY_THIN_PORT"
     -o ControlPath="$OMARCHY_THIN_CONTROL"
-    -o BatchMode=yes
-    # Waypipe compresses window updates itself; compressing them again in SSH
-    # only burns CPU on both ends.
+    # The device key proves this is an enrolled thin client; the person's
+    # password, asked at sign-in, proves who is using it.
+    -o IdentityFile="$OMARCHY_THIN_ETC/device_key"
+    -o IdentitiesOnly=yes
+    # The server's host key was pinned when the device was installed.
+    -o UserKnownHostsFile="$OMARCHY_THIN_ETC/known_hosts"
+    -o StrictHostKeyChecking=yes
+    -o HostKeyAlias=omarchy-server
+    # wprs compresses the display itself; compressing it again in SSH only
+    # burns CPU on both ends.
     -o Compression=no
-    # ChaCha20 is fast on ARM boards without AES instructions.
+    # ChaCha20 is fast on CPUs without AES instructions.
     -o Ciphers=chacha20-poly1305@openssh.com,aes128-gcm@openssh.com,aes256-gcm@openssh.com
     -o IPQoS=lowdelay
-    -o ServerAliveInterval=15
-    -o ServerAliveCountMax=8
+    -o ServerAliveInterval=10
+    -o ServerAliveCountMax=3
   )
 }
 
@@ -72,16 +86,18 @@ thin_remote_command() {
   printf '%q ' "$@"
 }
 
-# Run a command on the server over the shared connection.
+# Run a command on the server over the signed-in connection. Never opens a
+# connection of its own: without a signed-in session there is nobody to be.
 thin_ssh() {
-  ssh "${OMARCHY_THIN_SSH_OPTS[@]}" -o ControlMaster=no "$@"
+  ssh "${OMARCHY_THIN_SSH_OPTS[@]}" -o ControlMaster=no -o BatchMode=yes "$@"
 }
 
 thin_connected() {
-  ssh "${OMARCHY_THIN_SSH_OPTS[@]}" -O check "$OMARCHY_THIN_SERVER" >/dev/null 2>&1
+  [[ -S $OMARCHY_THIN_CONTROL ]] &&
+    ssh "${OMARCHY_THIN_SSH_OPTS[@]}" -O check "$OMARCHY_THIN_DESTINATION" >/dev/null 2>&1
 }
 
-# Wait for omarchy-thin-connect to bring the shared connection up.
+# Wait for the signed-in connection.
 thin_wait_connected() {
   local timeout=${1:-30} waited=0
 
@@ -141,5 +157,5 @@ thin_terminal_command_name() {
 }
 
 thin_notify_offline() {
-  omarchy-notification-send -u critical -g 󰒍 "Not connected to the Omarchy server" "Check the network, or run: omarchy thin status" >/dev/null 2>&1 || true
+  omarchy-notification-send -u critical -g 󰒍 "Not signed in to the Omarchy server" "Sign in again, or run: omarchy thin status" >/dev/null 2>&1 || true
 }

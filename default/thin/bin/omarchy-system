@@ -1,0 +1,10 @@
+#!/bin/bash
+
+# Thin client overlay: Logout returns to the sign-in screen (your apps keep
+# running on the server). Reboot and shutdown act on this device as usual.
+
+if [[ ${1:-} == "logout" ]]; then
+  exec omarchy-thin-logout
+fi
+
+exec "$OMARCHY_PATH/bin/omarchy-system" "$@"

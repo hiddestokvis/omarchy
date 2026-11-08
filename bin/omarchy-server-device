@@ -1,0 +1,61 @@
+#!/bin/bash
+
+# omarchy:summary=Enroll, list, or remove the thin client devices allowed to connect
+# omarchy:args=<list|add <name> [key-file|key]|remove <name>>
+# omarchy:examples=omarchy server device list | omarchy server device remove kitchen-imac
+# omarchy:requires-sudo=true
+
+# Signing in takes both an enrolled device (its key is listed here) and the
+# person's password, so a stolen password is useless away from your devices
+# and a stolen device is useless without a password. add reads the public key
+# from the file, or from stdin, which is how omarchy-thin-install enrolls.
+
+set -euo pipefail
+
+devices=/etc/omarchy-server/devices
+
+if (( EUID != 0 )); then
+  exec sudo "$0" "$@"
+fi
+
+touch "$devices"
+chmod 644 "$devices"
+
+case ${1:-list} in
+list)
+  awk '{ print $NF }' "$devices" | sed 's/^omarchy-thin://'
+  ;;
+add)
+  name=${2:?Usage: omarchy-server-device add <name> [key-file]}
+  [[ $name =~ ^[A-Za-z0-9._-]{1,64}$ ]] || {
+    echo "Device names use letters, digits, dot, dash and underscore." >&2
+    exit 1
+  }
+  source_key=${3:-}
+  if [[ -n $source_key && -f $source_key ]]; then
+    read -r type key _ <"$source_key"
+  elif [[ -n $source_key ]]; then
+    read -r type key _ <<<"$source_key"
+  else
+    read -r type key _
+  fi
+  if [[ ! $type =~ ^(ssh-ed25519|ecdsa-sha2-nistp256|ssh-rsa)$ || ! $key =~ ^[A-Za-z0-9+/=]+$ ]]; then
+    echo "That is not an SSH public key." >&2
+    exit 1
+  fi
+  sed -i "/ omarchy-thin:$name\$/d" "$devices"
+  # Device keys can only open sessions, never forward agents or X11.
+  echo "restrict,port-forwarding,pty $type $key omarchy-thin:$name" >>"$devices"
+  echo "Enrolled $name."
+  ;;
+remove)
+  name=${2:?Usage: omarchy-server-device remove <name>}
+  [[ $name =~ ^[A-Za-z0-9._-]{1,64}$ ]] || exit 1
+  sed -i "/ omarchy-thin:$name\$/d" "$devices"
+  echo "Removed $name. It can no longer connect."
+  ;;
+*)
+  echo "Usage: omarchy-server-device <list|add <name> [key-file]|remove <name>>" >&2
+  exit 1
+  ;;
+esac

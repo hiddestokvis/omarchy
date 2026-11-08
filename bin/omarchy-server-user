@@ -1,0 +1,116 @@
+#!/bin/bash
+
+# omarchy:summary=Add, list, or remove the people who use this Omarchy server from thin clients
+# omarchy:args=<list|add <username> [profile]|set-profile <username> <profile>|password <username>|remove <username> [--delete-files]>
+# omarchy:examples=omarchy server user add alice | omarchy server user add sam students | omarchy server user set-profile sam default
+# omarchy:requires-sudo=true
+
+set -euo pipefail
+
+users_file=/etc/omarchy-server/users
+profiles=/etc/omarchy-server/profiles
+
+usage() {
+  echo "Usage: omarchy-server-user <list|add <username> [profile]|set-profile <username> <profile>|password <username>|remove <username> [--delete-files]>" >&2
+  exit 1
+}
+
+action=${1:-list}
+user=${2:-}
+
+if [[ $action != "list" ]] && (( EUID != 0 )); then
+  exec sudo "$0" "$@"
+fi
+
+require_user() {
+  [[ $user =~ ^[a-z_][a-z0-9_-]{0,31}$ ]] || usage
+}
+
+require_profile() {
+  [[ $1 =~ ^[a-z0-9][a-z0-9_-]{0,31}$ && -f $profiles/$1.conf ]] || {
+    echo "No profile named $1. See: omarchy server profile list" >&2
+    exit 1
+  }
+}
+
+set_profile() {
+  sed -i "/^$user /d" "$users_file"
+  echo "$user $1" >>"$users_file"
+}
+
+case $action in
+list)
+  printf '%-20s %-16s %s\n' USER PROFILE DESKTOP
+  while read -r name profile _; do
+    [[ -n $name ]] || continue
+    uid=$(id -u "$name" 2>/dev/null) || continue
+    desktop=stopped
+    if [[ -d /run/user/$uid ]] && pgrep -u "$uid" -x wprsd >/dev/null; then
+      desktop=running
+    fi
+    printf '%-20s %-16s %s\n' "$name" "$profile" "$desktop"
+  done <"$users_file"
+  ;;
+add)
+  require_user
+  profile=${3:-default}
+  require_profile "$profile"
+
+  if ! id "$user" >/dev/null 2>&1; then
+    useradd --create-home --shell /bin/bash --groups omarchy-thin "$user"
+    echo "Choose a password for $user. It is what they type on the thin client sign-in screen."
+    passwd "$user"
+    # Shipped configs came from /etc/skel; finish the per-user setup as the user.
+    runuser -u "$user" -- env OMARCHY_PATH="$OMARCHY_PATH" omarchy-provision-user ||
+      echo "omarchy-provision-user did not finish; $user can run 'omarchy finalize user' later." >&2
+  else
+    usermod --append --groups omarchy-thin "$user"
+  fi
+
+  # Lingering keeps the person's desktop and apps running between sign-ins.
+  loginctl enable-linger "$user"
+  set_profile "$profile"
+
+  omarchy-server-cameras --apply
+  omarchy-server-user-apply "$user"
+  omarchy-server-firewall --apply
+  echo "$user can now sign in on any enrolled thin client."
+  ;;
+set-profile)
+  require_user
+  profile=${3:-}
+  require_profile "$profile"
+  grep -q "^$user " "$users_file" || {
+    echo "$user is not a thin client user. Add them with: omarchy server user add $user" >&2
+    exit 1
+  }
+  set_profile "$profile"
+  omarchy-server-user-apply "$user"
+  omarchy-server-firewall --apply
+  ;;
+password)
+  require_user
+  passwd "$user"
+  ;;
+remove)
+  require_user
+  uid=$(id -u "$user")
+  runuser -u "$user" -- env XDG_RUNTIME_DIR="/run/user/$uid" omarchy-server-desktop end 2>/dev/null || true
+  loginctl disable-linger "$user" || true
+  gpasswd --delete "$user" omarchy-thin >/dev/null || true
+  sed -i "/^$user /d" "$users_file"
+  omarchy-server-cameras --apply
+  omarchy-server-firewall --apply
+  systemctl set-property "user-$uid.slice" CPUWeight= MemoryMax= MemoryHigh= 2>/dev/null || true
+
+  if [[ ${3:-} == "--delete-files" ]]; then
+    userdel --remove "$user"
+    echo "$user and their files are gone."
+  else
+    echo "$user can no longer sign in from thin clients. Their account and files are kept."
+  fi
+  ;;
+*)
+  usage
+  ;;
+esac

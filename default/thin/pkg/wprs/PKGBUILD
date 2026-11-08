@@ -1,0 +1,41 @@
+# Omarchy server and thin clients must run the same wprs build: its wire
+# protocol is not stable between versions. Both sides build this pinned commit.
+pkgname=omarchy-wprs
+pkgver=0.0.0.r12b864d
+pkgrel=1
+pkgdesc="Rootless, persistent remote Wayland sessions (wprs), pinned for Omarchy thin clients"
+arch=(x86_64 aarch64)
+url="https://github.com/wayland-transpositor/wprs"
+license=(Apache-2.0)
+depends=(libxkbcommon wayland xorg-xwayland)
+makedepends=(git rust)
+provides=(wprs)
+conflicts=(wprs wprs-git)
+options=(!lto !debug)
+_commit=12b864dc5b308e63edede4714f664afa88507fce
+source=("wprs::git+https://github.com/wayland-transpositor/wprs.git#commit=$_commit")
+sha256sums=(SKIP)
+
+build() {
+  cd wprs
+  # Upstream builds for x86-64-v3 (AVX2), which crashes on CPUs before 2013,
+  # like a 2010 iMac's. v2 (SSE4.2) runs on anything since 2009 and picks the
+  # SSE4.1 code paths. The setting outranks the one in .cargo/config.toml.
+  if [[ $CARCH == "x86_64" ]]; then
+    export RUSTFLAGS="-C target-cpu=x86-64-v2"
+  fi
+  # Use the system Rust rather than the toolchain rustup would download.
+  export RUSTUP_TOOLCHAIN=stable
+  cargo build --frozen --profile=release-lto --bins
+}
+
+prepare() {
+  cd wprs
+  cargo fetch --locked --target "$(rustc -vV | sed -n 's/host: //p')"
+}
+
+package() {
+  cd wprs
+  install -Dm755 target/release-lto/wprsd target/release-lto/wprsc target/release-lto/xwayland-xdg-shell -t "$pkgdir/usr/bin"
+  install -Dm644 LICENSE "$pkgdir/usr/share/licenses/$pkgname/LICENSE"
+}

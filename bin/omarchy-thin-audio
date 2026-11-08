@@ -24,7 +24,7 @@ rtp_caps="application/x-rtp-stream,media=audio,clock-rate=48000,encoding-name=OP
 
 case ${1:-} in
 speakers)
-  thin_ssh -T "$OMARCHY_THIN_SERVER" -- omarchy-server-audio speakers "$OMARCHY_THIN_SPEAKER_BITRATE" |
+  thin_ssh -T "$OMARCHY_THIN_DESTINATION" -- omarchy-server-audio speakers "$OMARCHY_THIN_SPEAKER_BITRATE" |
     gst-launch-1.0 -q fdsrc fd=0 do-timestamp=true ! "$rtp_caps" ! rtpstreamdepay ! \
       rtpjitterbuffer latency=60 ! rtpopusdepay ! opusdec plc=true ! \
       audioconvert ! audioresample ! pulsesink client-name="Omarchy server"
@@ -34,7 +34,7 @@ mic)
     audioconvert ! audioresample ! audio/x-raw,rate=48000,channels=1 ! \
     opusenc bitrate="$OMARCHY_THIN_MIC_BITRATE" frame-size=10 audio-type=voice dtx=true ! \
     rtpopuspay pt=96 ! rtpstreampay ! fdsink fd=1 sync=false |
-    thin_ssh -T "$OMARCHY_THIN_SERVER" -- omarchy-server-audio mic
+    thin_ssh -T "$OMARCHY_THIN_DESTINATION" -- omarchy-server-audio mic
   ;;
 *)
   echo "Usage: omarchy-thin-audio <speakers|mic>" >&2

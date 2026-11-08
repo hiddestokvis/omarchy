@@ -7,12 +7,12 @@ thin_load_config || exit 1
 
 echo "Server:  $OMARCHY_THIN_SERVER (port $OMARCHY_THIN_PORT)"
 if thin_connected; then
-  echo "Session: connected"
+  echo "Session: $OMARCHY_THIN_USER signed in"
 else
-  echo "Session: not connected"
+  echo "Session: nobody signed in"
 fi
 
-for unit in omarchy-thin omarchy-thin-speakers omarchy-thin-mic omarchy-thin-notifications omarchy-thin-camera; do
+for unit in omarchy-thin-greeter omarchy-thin-link omarchy-thin-display omarchy-thin-speakers omarchy-thin-mic omarchy-thin-notifications omarchy-thin-camera; do
   printf '  %-28s %s\n' "$unit" "$(systemctl --user is-active "$unit.service" 2>/dev/null)"
 done
 

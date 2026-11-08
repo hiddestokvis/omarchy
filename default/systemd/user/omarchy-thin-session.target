@@ -1,0 +1,6 @@
+[Unit]
+Description=Omarchy thin client signed-in session
+# Started by omarchy-thin-greeter once someone has signed in and attached to
+# their desktop; stopped when they leave.
+Wants=omarchy-thin-display.service omarchy-thin-speakers.service omarchy-thin-mic.service omarchy-thin-notifications.service
+StopWhenUnneeded=no

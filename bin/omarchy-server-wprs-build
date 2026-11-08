@@ -1,0 +1,24 @@
+#!/bin/bash
+
+# omarchy:summary=Build the pinned wprs package that the server and its thin clients share
+# omarchy:hidden=true
+
+# Builds as the calling (non-root) user, installs it here, and keeps a copy
+# in /var/lib/omarchy-server/packages so thin clients of the same CPU
+# architecture install the identical build instead of compiling it themselves.
+
+set -euo pipefail
+
+if (( EUID == 0 )); then
+  echo "Run omarchy-server-wprs-build as your user, not root; it uses sudo to install." >&2
+  exit 1
+fi
+
+work=$(mktemp -d)
+trap 'rm -rf "$work"' EXIT
+cp "$OMARCHY_PATH/default/thin/pkg/wprs/PKGBUILD" "$work/"
+(cd "$work" && makepkg --syncdeps --noconfirm --needed)
+
+package=$(find "$work" -maxdepth 1 -name 'omarchy-wprs-*.pkg.tar.zst' -print -quit)
+sudo pacman -U --noconfirm "$package"
+sudo install -D -m 644 "$package" "/var/lib/omarchy-server/packages/${package##*/}"

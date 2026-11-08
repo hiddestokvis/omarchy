@@ -1,0 +1,13 @@
+[Unit]
+Description=Omarchy server per-person network rules
+After=nftables.service ufw.service
+ConditionPathExists=/etc/omarchy-server/firewall.nft
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/usr/bin/nft -f /etc/omarchy-server/firewall.nft
+ExecStop=/usr/bin/nft delete table inet omarchy_server
+
+[Install]
+WantedBy=multi-user.target

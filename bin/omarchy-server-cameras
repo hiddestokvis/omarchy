@@ -15,7 +15,7 @@ users_file=/etc/omarchy-server/users
 first_device=40
 
 user_index() {
-  grep -nxF "$1" "$users_file" 2>/dev/null | head -1 | cut -d: -f1
+  awk '{ print $1 }' "$users_file" 2>/dev/null | grep -nxF "$1" 2>/dev/null | head -1 | cut -d: -f1
 }
 
 case ${1:---apply} in
@@ -29,7 +29,7 @@ case ${1:---apply} in
     exit 1
   fi
 
-  mapfile -t users < <(grep -vE '^\s*$' "$users_file" 2>/dev/null || true)
+  mapfile -t users < <(awk 'NF { print $1 }' "$users_file" 2>/dev/null || true)
   count=${#users[@]}
 
   rules=/etc/udev/rules.d/71-omarchy-server-cameras.rules

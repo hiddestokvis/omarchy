@@ -62,7 +62,7 @@ stream() {
   ffmpeg -hide_banner -loglevel error -nostdin \
     -f v4l2 -input_format mjpeg -framerate "$OMARCHY_THIN_CAMERA_FPS" -video_size "$OMARCHY_THIN_CAMERA_SIZE" \
     -i "$OMARCHY_THIN_CAMERA_DEVICE" -an $(encoder_options) - |
-    thin_ssh -T "$OMARCHY_THIN_SERVER" -- omarchy-server-camera "$format"
+    thin_ssh -T "$OMARCHY_THIN_DESTINATION" -- omarchy-server-camera "$format"
 }
 
 case ${1:-toggle} in

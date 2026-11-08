@@ -1,0 +1,18 @@
+#!/bin/bash
+
+# omarchy:summary=Show the signed-in person's server desktop on this thin client (run by omarchy-thin-display.service)
+# omarchy:hidden=true
+
+# wprsc recreates every window of the server desktop as a native window of
+# this device's compositor, from the losslessly compressed buffers wprsd sends.
+
+source "$OMARCHY_PATH/default/thin/client.sh"
+thin_load_config || exit 1
+
+socket="$OMARCHY_THIN_STATE/wprs.sock"
+for _ in {1..40}; do
+  [[ -S $socket ]] && break
+  sleep 0.25
+done
+
+exec wprsc --socket "$socket" --control-socket "$OMARCHY_THIN_STATE/wprsc-ctrl.sock"

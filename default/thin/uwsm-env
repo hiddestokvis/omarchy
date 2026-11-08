@@ -1,5 +1,5 @@
 # Omarchy thin client session environment, linked into ~/.config/uwsm/env.d by
-# omarchy-thin-setup. Changes require a new login.
+# omarchy-thin-install for the thin account. Changes require a new login.
 
 export OMARCHY_THIN=1
 

@@ -1,7 +1,7 @@
 [Unit]
 Description=Omarchy thin client mic
-After=omarchy-thin.service
-PartOf=omarchy-thin.service
+After=omarchy-thin-display.service
+PartOf=omarchy-thin-session.target
 
 [Service]
 Type=simple
@@ -12,5 +12,3 @@ RestartSec=2
 RestartPreventExitStatus=77
 SuccessExitStatus=77
 
-[Install]
-WantedBy=omarchy-thin.service

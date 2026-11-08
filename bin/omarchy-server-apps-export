@@ -12,12 +12,23 @@ set -euo pipefail
 
 IFS=: read -ra data_dirs <<<"${XDG_DATA_HOME:-$HOME/.local/share}:${XDG_DATA_DIRS:-/usr/local/share:/usr/share}"
 
+# A profile may limit the launcher to some apps; the person's own entries
+# (web apps, for one) always show.
+declare -A only=()
+while IFS= read -r app; do
+  [[ -n $app ]] && only[$app]=1
+done < <(cat "$HOME/.local/state/omarchy/thin/launcher-only" 2>/dev/null)
+own_dir=${XDG_DATA_HOME:-$HOME/.local/share}
+
 declare -A entries=()
 for data_dir in "${data_dirs[@]}"; do
   [[ -d $data_dir/applications ]] || continue
   while IFS= read -r -d '' file; do
     id=${file#"$data_dir/applications/"}
     id=${id//\//-}
+    if (( ${#only[@]} )) && [[ $data_dir != "$own_dir" && -z ${only[${id%.desktop}]:-} ]]; then
+      continue
+    fi
     [[ -n ${entries[$id]:-} ]] || entries[$id]=$file
   done < <(find -L "$data_dir/applications" -name '*.desktop' -type f -print0 2>/dev/null)
 done

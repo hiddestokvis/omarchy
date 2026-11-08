@@ -11,8 +11,8 @@ source "$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)/base-test.sh"
 
 work=$(mktemp -d)
 trap 'rm -rf "$work"' EXIT
-mkdir -p "$work/bin" "$work/home/.config/omarchy"
-export HOME="$work/home" CALLS="$work/calls"
+mkdir -p "$work/bin" "$work/home" "$work/etc"
+export HOME="$work/home" CALLS="$work/calls" OMARCHY_THIN_ETC="$work/etc"
 
 cat >"$work/bin/uwsm-app" <<'SH'
 #!/bin/bash
@@ -24,7 +24,7 @@ printf 'remote %s\n' "$*" >>"$CALLS"
 SH
 chmod +x "$work/bin/"*
 
-echo 'OMARCHY_THIN_SERVER="alice@server"' >"$HOME/.config/omarchy/thin.conf"
+echo 'OMARCHY_THIN_SERVER="server"' >"$OMARCHY_THIN_ETC/thin.conf"
 export PATH="$ROOT/default/thin/bin:$work/bin:$PATH"
 
 launch() {
@@ -56,8 +56,36 @@ script="omarchy-show-logo; omarchy-setup-wifi; code=\$?"
 [[ $(launch xdg-terminal-exec -e bash -c "$script") == "local -- xdg-terminal-exec -e bash -c $script" ]] ||
   fail "menu setup flows for this device stay local"
 
-echo 'OMARCHY_THIN_LOCAL_APPS=(firefox)' >>"$HOME/.config/omarchy/thin.conf"
+echo 'OMARCHY_THIN_LOCAL_APPS=(firefox)' >>"$OMARCHY_THIN_ETC/thin.conf"
 [[ $(launch firefox) == "local -- firefox" ]] ||
   fail "apps listed in OMARCHY_THIN_LOCAL_APPS stay on the device"
 
 pass "thin client routes launches between device and server"
+
+# Per-person network rules: a profile entry that parses wrong either blocks
+# what an admin allowed or, worse, lets through what they denied.
+server_etc="$work/server"
+mkdir -p "$server_etc/profiles"
+cat >"$server_etc/profiles/kids.conf" <<'CONF'
+NETWORK=deny
+NETWORK_ALLOW=("tcp:443" "10.0.0.0/8" "tcp:22@10.0.0.5" "fd00::/8" "example.com")
+CONF
+cat >"$server_etc/profiles/work.conf" <<'CONF'
+NETWORK_DENY=("tcp:25")
+CONF
+echo 'NETWORK=allow' >"$server_etc/profiles/open.conf"
+printf '%s kids\nnobody work\ndaemon open\n' "$(id -un)" >"$server_etc/users"
+
+rules=$(OMARCHY_SERVER_ETC="$server_etc" "$ROOT/bin/omarchy-server-firewall" --show 2>"$work/firewall.err")
+person=$(id -un)
+person_chain=$(awk -v c="chain person_${person//-/_} {" '$0 ~ c { found = 1; next } found && /}/ { exit } found' <<<"$rules")
+
+[[ $rules == *"meta skuid $(id -u) jump person_${person//-/_}"* ]] || fail "a restricted person's traffic goes through their chain"
+[[ $person_chain == *"tcp dport 443 accept"* && $person_chain == *"ip daddr 10.0.0.5 tcp dport 22 accept"* &&
+  $person_chain == *"ip6 daddr fd00::/8 accept"* ]] || fail "allowed ports, hosts and networks are let through"
+[[ $(tail -1 <<<"$person_chain") == *"reject"* ]] || fail "a deny profile rejects everything it does not allow"
+grep -q "example.com" "$work/firewall.err" || fail "host names are refused rather than silently dropped"
+[[ $rules == *"tcp dport 25 counter reject"* ]] || fail "an allow profile rejects what it denies"
+[[ $rules != *"skuid $(id -u daemon) "* ]] || fail "an unrestricted profile adds no rules"
+
+pass "server firewall turns profiles into per-person rules"

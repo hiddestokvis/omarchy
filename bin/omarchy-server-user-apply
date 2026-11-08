@@ -1,0 +1,71 @@
+#!/bin/bash
+
+# omarchy:summary=Apply a person's profile: resources, launcher, web apps, theme and background
+# omarchy:args=<username>
+# omarchy:hidden=true
+# omarchy:requires-sudo=true
+
+set -euo pipefail
+
+if (( EUID != 0 )); then
+  exec sudo "$0" "$@"
+fi
+
+user=${1:-}
+[[ $user =~ ^[a-z_][a-z0-9_-]{0,31}$ ]] || {
+  echo "Usage: omarchy-server-user-apply <username>" >&2
+  exit 1
+}
+
+profile=$(awk -v u="$user" '$1 == u { print $2 }' /etc/omarchy-server/users)
+profile_file=/etc/omarchy-server/profiles/${profile:-default}.conf
+[[ -f $profile_file ]] || {
+  echo "$user has no profile; see omarchy server user set-profile" >&2
+  exit 1
+}
+
+uid=$(id -u "$user")
+home=$(getent passwd "$user" | cut -d: -f6)
+
+APPS=() LAUNCHER_ONLY=() WEBAPPS=() THEME="" BACKGROUND="" THEME_LOCKED=0 CPU_WEIGHT=100 MEMORY_MAX=""
+source "$profile_file"
+
+# Resources: persistent per-user slice settings.
+properties=("CPUWeight=$CPU_WEIGHT")
+[[ -n $MEMORY_MAX ]] && properties+=("MemoryMax=$MEMORY_MAX" "MemoryHigh=$MEMORY_MAX")
+systemctl set-property "user-$uid.slice" "${properties[@]}"
+
+as_user() {
+  runuser -u "$user" -- env HOME="$home" XDG_RUNTIME_DIR="/run/user/$uid" OMARCHY_PATH="$OMARCHY_PATH" "$@"
+}
+
+# Launcher curation, read by omarchy-server-apps-export.
+state="$home/.local/state/omarchy/thin"
+as_user mkdir -p "$state"
+printf '%s\n' "${LAUNCHER_ONLY[@]}" | as_user tee "$state/launcher-only" >/dev/null
+
+# Web apps the profile hands out.
+for webapp in "${WEBAPPS[@]}"; do
+  IFS='|' read -r webapp_name webapp_url webapp_icon <<<"$webapp"
+  [[ -n $webapp_name && -n $webapp_url ]] || continue
+  if [[ ! -f $home/.local/share/applications/$webapp_name.desktop ]]; then
+    as_user omarchy-webapp-install "$webapp_name" "$webapp_url" "${webapp_icon:-$webapp_url/favicon.ico}" >/dev/null 2>&1 ||
+      echo "Could not add web app $webapp_name for $user" >&2
+  fi
+done
+
+# Theme: only when the person has none yet, unless the profile locks it.
+current_theme=$(cat "$home/.local/state/omarchy/current/theme.name" 2>/dev/null || true)
+if [[ -n $THEME ]] && { [[ -z $current_theme ]] || (( THEME_LOCKED )); } && [[ $current_theme != "$THEME" ]]; then
+  as_user omarchy-server-look set "$THEME" --force || echo "Could not set theme $THEME for $user" >&2
+fi
+
+# Background: once per profile background, or every time when the look is locked.
+applied=$(cat "$state/background-applied" 2>/dev/null || true)
+if [[ -n $BACKGROUND && -f $BACKGROUND ]] && { (( THEME_LOCKED )) || [[ $applied != "$BACKGROUND" ]]; }; then
+  if as_user omarchy-theme-bg-set "$BACKGROUND" >/dev/null 2>&1; then
+    echo "$BACKGROUND" | as_user tee "$state/background-applied" >/dev/null
+  else
+    echo "Could not set background for $user" >&2
+  fi
+fi

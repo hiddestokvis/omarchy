@@ -1,21 +1,30 @@
 #!/bin/bash
 
-# omarchy:summary=Show who is connected to this Omarchy server and what they use
+# omarchy:summary=Show who is on this Omarchy server, from which device, and what they use
 
-printf '%-16s %-10s %10s %12s %9s\n' USER SESSION MEMORY CPU-TIME PROCESSES
+printf '%-16s %-12s %-12s %-18s %10s %10s\n' USER PROFILE DESKTOP DEVICE MEMORY CPU-TIME
 
-while IFS= read -r user; do
+while read -r user profile _; do
   [[ -n $user ]] || continue
   uid=$(id -u "$user" 2>/dev/null) || continue
 
-  session=offline
-  pgrep -u "$user" -f omarchy-server-session >/dev/null && session=connected
+  desktop=stopped device=-
+  if pgrep -u "$uid" -x wprsd >/dev/null; then
+    desktop=detached
+    attached=/run/user/$uid/omarchy-thin/attached
+    if sudo -n test -f "$attached" 2>/dev/null; then
+      read -r pid device_name < <(sudo -n cat "$attached")
+      if [[ $(ps -o comm= -p "$pid" 2>/dev/null) == sshd* ]]; then
+        desktop=attached
+        device=${device_name:--}
+      fi
+    fi
+  fi
 
   memory=$(systemctl show "user-$uid.slice" -p MemoryCurrent --value 2>/dev/null)
   cpu=$(systemctl show "user-$uid.slice" -p CPUUsageNSec --value 2>/dev/null)
   [[ $memory =~ ^[0-9]+$ ]] && memory=$(numfmt --to=iec "$memory") || memory=-
   [[ $cpu =~ ^[0-9]+$ ]] && cpu="$((cpu / 1000000000))s" || cpu=-
-  processes=$(pgrep -u "$user" -c)
 
-  printf '%-16s %-10s %10s %12s %9s\n' "$user" "$session" "$memory" "$cpu" "$processes"
+  printf '%-16s %-12s %-12s %-18s %10s %10s\n' "$user" "$profile" "$desktop" "$device" "$memory" "$cpu"
 done </etc/omarchy-server/users 2>/dev/null

@@ -18,4 +18,4 @@ if ! thin_wait_connected 5; then
   exit 1
 fi
 
-thin_ssh -n -T "$OMARCHY_THIN_SERVER" -- omarchy-server-launch "$(thin_remote_command "$@")"
+thin_ssh -n -T "$OMARCHY_THIN_DESTINATION" -- omarchy-server-launch "$(thin_remote_command "$@")"

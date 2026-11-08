@@ -1,0 +1,173 @@
+#!/bin/bash
+
+# omarchy:summary=Run, attach to, or end a person's persistent desktop on the Omarchy server
+# omarchy:args=<run|attach|end|status>
+# omarchy:hidden=true
+
+# The desktop is wprsd, a Wayland compositor that renders nothing: it keeps
+# every app's windows and last frame in memory and sends them, losslessly
+# compressed, to whichever thin client is attached. It runs as a user service
+# with lingering enabled, so apps keep running with nobody attached and a
+# person picks up exactly where they left off, on any thin client.
+#
+#   run     the service itself (omarchy-server-desktop.service)
+#   attach  called by a thin client at sign-in: starts the desktop if needed,
+#           detaches any other device, then holds the channel open for as long
+#           as this device is the attached one
+#   end     close every app and stop the desktop (Sign out on the client)
+
+set -uo pipefail
+
+state="$XDG_RUNTIME_DIR/omarchy-thin"
+env_file="$state/env"
+wayland_display=wprs-0
+# Each user gets an X display of their own, derived from the uid.
+x_display=$((100 + UID % 800))
+
+session_vars=(WAYLAND_DISPLAY DISPLAY XDG_SESSION_TYPE XDG_CURRENT_DESKTOP PATH OMARCHY_THIN_SESSION
+  MOZ_ENABLE_WAYLAND ELECTRON_OZONE_PLATFORM_HINT QT_QPA_PLATFORM GDK_BACKEND SDL_VIDEODRIVER)
+
+run() {
+  local modules=() module var present_vars=()
+
+  mkdir -p "$state"
+  chmod 700 "$state"
+
+  cleanup() {
+    for module in "${modules[@]}"; do
+      pactl unload-module "$module" 2>/dev/null
+    done
+    rm -f "$env_file" "$state/mic.fifo"
+    systemctl --user unset-environment "${session_vars[@]}" 2>/dev/null
+  }
+  trap cleanup EXIT
+
+  # Apps play into a private sink that omarchy-server-audio streams to the
+  # attached device, and record from a source fed by its microphone.
+  for _ in {1..40}; do
+    pactl info >/dev/null 2>&1 && break
+    sleep 0.25
+  done
+  rm -f "$state/mic.fifo"
+  mkfifo -m 600 "$state/mic.fifo"
+  if module=$(pactl load-module module-null-sink sink_name=omarchy_thin_speakers \
+    sink_properties=device.description=Thin-client-speakers); then
+    modules+=("$module")
+    pactl set-default-sink omarchy_thin_speakers
+  fi
+  if module=$(pactl load-module module-pipe-source source_name=omarchy_thin_mic "file=$state/mic.fifo" \
+    format=s16le rate=48000 channels=1 source_properties=device.description=Thin-client-microphone); then
+    modules+=("$module")
+    pactl set-default-source omarchy_thin_mic
+  fi
+
+  export WAYLAND_DISPLAY=$wayland_display
+  export DISPLAY=":$x_display"
+  export XDG_SESSION_TYPE=wayland
+  export XDG_CURRENT_DESKTOP=Hyprland
+  export OMARCHY_THIN_SESSION=1
+  export PATH="${OMARCHY_PATH:-/usr/share/omarchy}/default/thin/server-bin:$PATH"
+  export MOZ_ENABLE_WAYLAND=1
+  export ELECTRON_OZONE_PLATFORM_HINT=wayland
+  export QT_QPA_PLATFORM="wayland;xcb"
+  export GDK_BACKEND="wayland,x11"
+  export SDL_VIDEODRIVER="wayland,x11"
+
+  # Shared with omarchy-server-launch and omarchy-server-exec (bash and
+  # systemd EnvironmentFile both read this format).
+  : >"$env_file"
+  for var in "${session_vars[@]}"; do
+    if [[ -n ${!var:-} ]]; then
+      printf '%s="%s"\n' "$var" "${!var}" >>"$env_file"
+      present_vars+=("$var")
+    fi
+  done
+
+  # D-Bus activated apps (Nautilus, portals) start from the user manager, so it
+  # needs the display too.
+  systemctl --user import-environment "${present_vars[@]}"
+  dbus-update-activation-environment --systemd "${present_vars[@]}"
+
+  wprsd --wayland-display "$wayland_display" \
+    --socket "$XDG_RUNTIME_DIR/wprs.sock" \
+    --control-socket "$XDG_RUNTIME_DIR/wprsd-ctrl.sock" \
+    --enable-xwayland true \
+    --xwayland-xdg-shell-args="--display,$x_display" \
+    --kde-server-side-decorations false
+}
+
+# The sshd process that serves the SSH connection this command runs in.
+connection_pid() {
+  local pid=$$ name
+
+  while (( pid > 1 )); do
+    name=$(ps -o comm= -p "$pid" 2>/dev/null)
+    if [[ $name == sshd* ]]; then
+      echo "$pid"
+      return
+    fi
+    pid=$(ps -o ppid= -p "$pid" 2>/dev/null | tr -d ' ')
+  done
+}
+
+attach() {
+  local previous_shell previous_connection mine device=${1:-}
+
+  mkdir -p "$state"
+  chmod 700 "$state"
+
+  # One attached device per person. The previous device's attach channel is
+  # told it moved, says so to its device, and closes its connection; that
+  # device goes back to its sign-in screen. Its apps stay right where they are.
+  mine=$(connection_pid)
+  if [[ -f $state/attached ]]; then
+    read -r previous_shell previous_connection _ <"$state/attached"
+    if [[ -n $previous_connection && $previous_connection != "$mine" ]]; then
+      kill -USR1 "$previous_shell" 2>/dev/null
+      sleep 1
+      if [[ $(ps -o comm= -p "$previous_connection" 2>/dev/null) == sshd* ]]; then
+        kill "$previous_connection"
+      fi
+    fi
+  fi
+  echo "$$ $mine $device" >"$state/attached"
+
+  omarchy-server-look enforce
+  systemctl --user start omarchy-server-desktop.service
+  for _ in {1..40}; do
+    [[ -S $XDG_RUNTIME_DIR/wprs.sock ]] && break
+    sleep 0.25
+  done
+
+  if [[ ! -S $XDG_RUNTIME_DIR/wprs.sock ]]; then
+    echo "error the desktop did not start; ask an admin to check: journalctl --user -u omarchy-server-desktop"
+    exit 1
+  fi
+
+  # The thin client forwards this socket to its wprsc once it reads "ready".
+  echo "ready $XDG_RUNTIME_DIR/wprs.sock"
+
+  trap 'echo moved; kill "$mine" 2>/dev/null; exit 0' USR1
+
+  # Held open until the device disconnects or another device takes over.
+  # Waiting on a background cat keeps the USR1 trap responsive.
+  cat >/dev/null &
+  wait "$!"
+}
+
+end() {
+  systemctl --user stop 'omarchy-thin-app-*' 2>/dev/null
+  systemctl --user stop omarchy-server-desktop.service
+  rm -f "$state/attached"
+}
+
+case ${1:-} in
+run) run ;;
+attach) attach "${2:-}" ;;
+end) end ;;
+status) systemctl --user is-active omarchy-server-desktop.service ;;
+*)
+  echo "Usage: omarchy-server-desktop <run|attach|end|status>" >&2
+  exit 1
+  ;;
+esac

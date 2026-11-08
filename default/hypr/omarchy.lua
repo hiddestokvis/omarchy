@@ -18,6 +18,7 @@ if _G.omarchy_default_bindings ~= false then
   require("default.hypr.bindings.utilities")
   require("default.hypr.bindings.dictation")
   require_optional.module("default.hypr.bindings.applications")
+  require("default.hypr.bindings.thin-client")
 end
 if _G.omarchy_default_gestures ~= false then
   require("default.hypr.gestures")
@@ -35,3 +36,6 @@ require_optional.module("omarchy.current.theme.hyprland")
 
 -- Lighter defaults for a session that renders on the CPU, over the theme's.
 require("default.hypr.software-rendering")
+
+-- A thin client's look, tuned for old hardware, over the theme's.
+require("default.hypr.thin-client")

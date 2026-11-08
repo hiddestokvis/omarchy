@@ -1,0 +1,6 @@
+#!/bin/bash
+
+# omarchy:summary=Succeed when someone is signed in to the Omarchy server on this thin client
+# omarchy:hidden=true
+
+[[ -S ${XDG_RUNTIME_DIR:-/run/user/$UID}/omarchy-thin/ssh.sock ]]

@@ -1,8 +1,9 @@
 # Omarchy server for thin clients (omarchy-server-setup), on top of a normal
-# Omarchy install that provides the apps themselves.
+# Omarchy install that provides the apps themselves. wprs is built from
+# default/thin/pkg/wprs by omarchy-server-wprs-build.
 openssh
-waypipe
-xwayland-satellite
+xorg-xwayland
+nftables
 v4l2loopback-dkms
 v4l2loopback-utils
 gst-plugins-base

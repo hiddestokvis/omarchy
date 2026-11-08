@@ -1,0 +1,100 @@
+#!/bin/bash
+
+# omarchy:summary=Manage the profiles that set apps, theme, background, resources and network access for people on this server
+# omarchy:args=<list|show|add|edit|apply|remove> [name]
+# omarchy:examples=omarchy server profile add students | omarchy server profile edit students | omarchy server profile apply students
+# omarchy:requires-sudo=true
+
+set -euo pipefail
+
+profiles=/etc/omarchy-server/profiles
+users_file=/etc/omarchy-server/users
+
+usage() {
+  echo "Usage: omarchy-server-profile <list|show|add|edit|apply|remove> [name]" >&2
+  exit 1
+}
+
+action=${1:-list}
+name=${2:-}
+
+if [[ $action != "list" && $action != "show" ]] && (( EUID != 0 )); then
+  exec sudo "$0" "$@"
+fi
+
+require_name() {
+  [[ $name =~ ^[a-z0-9][a-z0-9_-]{0,31}$ ]] || usage
+}
+
+require_existing() {
+  require_name
+  [[ -f $profiles/$name.conf ]] || {
+    echo "No profile named $name. See: omarchy server profile list" >&2
+    exit 1
+  }
+}
+
+members() {
+  awk -v p="$1" '$2 == p { print $1 }' "$users_file" 2>/dev/null
+}
+
+case $action in
+list)
+  for file in "$profiles"/*.conf; do
+    [[ -f $file ]] || continue
+    profile=${file##*/}
+    profile=${profile%.conf}
+    printf '%-20s %s people\n' "$profile" "$(members "$profile" | wc -l)"
+  done
+  ;;
+show)
+  require_existing
+  cat "$profiles/$name.conf"
+  ;;
+add)
+  require_name
+  if [[ -e $profiles/$name.conf ]]; then
+    echo "Profile $name already exists." >&2
+    exit 1
+  fi
+  install -D -m 644 "$OMARCHY_PATH/default/thin/profile.conf" "$profiles/$name.conf"
+  "${EDITOR:-nvim}" "$profiles/$name.conf"
+  omarchy-server-profile apply "$name"
+  ;;
+edit)
+  require_existing
+  "${EDITOR:-nvim}" "$profiles/$name.conf"
+  omarchy-server-profile apply "$name"
+  ;;
+apply)
+  require_existing
+  # Check it parses before touching anyone.
+  bash -n "$profiles/$name.conf"
+  (
+    source "$profiles/$name.conf"
+    if (( ${#APPS[@]} )); then
+      echo "Installing apps for $name: ${APPS[*]}"
+      omarchy-pkg-add "${APPS[@]}"
+    fi
+  )
+  while IFS= read -r user; do
+    omarchy-server-user-apply "$user"
+  done < <(members "$name")
+  omarchy-server-firewall --apply
+  ;;
+remove)
+  require_existing
+  if [[ $name == "default" ]]; then
+    echo "The default profile can't be removed." >&2
+    exit 1
+  fi
+  if [[ -n $(members "$name") ]]; then
+    echo "Move these people to another profile first: $(members "$name" | xargs)" >&2
+    exit 1
+  fi
+  rm -f "$profiles/$name.conf"
+  ;;
+*)
+  usage
+  ;;
+esac

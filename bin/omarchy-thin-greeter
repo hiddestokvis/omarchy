@@ -1,0 +1,147 @@
+#!/bin/bash
+
+# omarchy:summary=Sign people in to their Omarchy server desktop (run by omarchy-thin-greeter.service)
+# omarchy:hidden=true
+
+# The thin client's whole lifecycle, as a loop:
+#   1. show the sign-in screen
+#   2. open the SSH connection with the device key and the person's password
+#   3. attach to their persistent desktop and start the display, audio and
+#      notification streams
+#   4. wait until they lock, log out, sign out, lose the network, or sign in
+#      on another device
+#   5. stop everything, wipe what the session left on this device, repeat
+
+set -uo pipefail
+
+source "$OMARCHY_PATH/default/thin/client.sh"
+thin_load_config || exit 1
+
+mkdir -p "$OMARCHY_THIN_STATE"
+chmod 700 "$OMARCHY_THIN_STATE"
+
+login_file="$OMARCHY_THIN_STATE/login"
+askpass_file="$OMARCHY_THIN_STATE/askpass"
+reason_file="$OMARCHY_THIN_STATE/reason"
+link_log="$OMARCHY_THIN_STATE/link.log"
+local_socket="$OMARCHY_THIN_STATE/wprs.sock"
+
+prompt() {
+  rm -f "$login_file"
+  foot --app-id=org.omarchy.thin-login --title="Omarchy" omarchy-thin-login-prompt "$1" >/dev/null 2>&1
+  [[ -f $login_file ]]
+}
+
+link_failure_message() {
+  if grep -q "Host key verification failed\|REMOTE HOST IDENTIFICATION HAS CHANGED" "$link_log"; then
+    echo "The server's identity has changed. Don't sign in; tell your administrator."
+  elif grep -q "Permission denied (publickey" "$link_log" && ! grep -q "keyboard-interactive" "$link_log"; then
+    echo "This device is not enrolled on the server. Ask your administrator."
+  elif grep -q "Permission denied\|Authentication failed" "$link_log"; then
+    echo "Wrong username or password."
+  elif grep -qi "resolve\|refused\|timed out\|unreachable\|no route" "$link_log"; then
+    echo "Can't reach $OMARCHY_THIN_SERVER. Check the network (Super + Ctrl + N)."
+  else
+    echo "Sign-in failed: $(tail -1 "$link_log")"
+  fi
+}
+
+# Open the SSH connection that every stream of this session rides on.
+open_link() {
+  local user=$1 password=$2
+
+  echo "$user" >"$OMARCHY_THIN_STATE/user"
+  thin_load_config
+
+  umask 077
+  printf '%s\n' "$password" >"$askpass_file"
+  : >"$link_log"
+
+  systemctl --user reset-failed omarchy-thin-link.service 2>/dev/null
+  systemd-run --user --quiet --collect --unit=omarchy-thin-link \
+    --property=StandardError="file:$link_log" \
+    --setenv=SSH_ASKPASS="$OMARCHY_PATH/bin/omarchy-thin-askpass" \
+    --setenv=SSH_ASKPASS_REQUIRE=force \
+    --setenv=OMARCHY_THIN_ASKPASS_FILE="$askpass_file" \
+    -- ssh "${OMARCHY_THIN_SSH_OPTS[@]}" \
+    -o ControlMaster=yes -o ControlPersist=no \
+    -o BatchMode=no -o NumberOfPasswordPrompts=1 \
+    -o PreferredAuthentications=publickey,keyboard-interactive \
+    -o ExitOnForwardFailure=yes \
+    -N "$OMARCHY_THIN_DESTINATION"
+
+  local waited=0
+  until thin_connected; do
+    if ! systemctl --user is-active --quiet omarchy-thin-link.service || (( waited >= 60 )); then
+      rm -f "$askpass_file"
+      return 1
+    fi
+    sleep 0.25
+    waited=$((waited + 1))
+  done
+
+  rm -f "$askpass_file"
+}
+
+# Clear what the person's session left on this device, so the next person
+# signing in here finds nothing of theirs.
+wipe_session() {
+  local line remote_socket attach_out moved=0
+
+  rm -f "$reason_file"
+
+  # Held open for the whole session: it ends when this device is detached.
+  coproc ATTACH { thin_ssh -T "$OMARCHY_THIN_DESTINATION" -- omarchy-server-desktop attach "$(hostname)"; }
+  exec {attach_out}<&"${ATTACH[0]}"
+
+  if ! read -r -t 30 -u "$attach_out" line || [[ $line != ready\ * ]]; then
+    echo "Your desktop could not start. ${line#error }"
+    return
+  fi
+  remote_socket=${line#ready }
+
+  rm -f "$local_socket"
+  if ! ssh "${OMARCHY_THIN_SSH_OPTS[@]}" -O forward -L "$local_socket:$remote_socket" "$OMARCHY_THIN_DESTINATION" >/dev/null 2>&1; then
+    echo "Could not connect to your desktop."
+    return
+  fi
+
+  omarchy-thin-look pull >/dev/null 2>&1 || true
+  omarchy-thin-sync-apps --force >/dev/null 2>&1 || true
+  systemctl --user start omarchy-thin-session.target
+
+  # Returns when the attach channel closes.
+  while read -r -u "$attach_out" line; do
+    [[ $line == "moved" ]] && moved=1
+  done
+  exec {attach_out}<&-
+
+  if [[ -f $reason_file ]]; then
+    cat "$reason_file"
+  elif (( moved )); then
+    echo "You signed in on another device. Your apps are waiting there."
+  else
+    echo "The connection to the server was lost. Your apps are still running there."
+  fi
+}
+
+message=""
+while true; do
+  if ! prompt "$message"; then
+    message=""
+    continue
+  fi
+
+  { read -r user; read -r password; } <"$login_file"
+  rm -f "$login_file"
+
+  if open_link "$user" "$password"; then
+    unset password
+    message=$(session)
+  else
+    unset password
+    message=$(link_failure_message)
+  fi
+
+  wipe_session
+done

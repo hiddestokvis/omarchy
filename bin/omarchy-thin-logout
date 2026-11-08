@@ -1,0 +1,14 @@
+#!/bin/bash
+
+# omarchy:summary=Leave this thin client; your apps keep running on the server
+# omarchy:args=[reason]
+
+# Back to the sign-in screen. Nothing on the server stops: sign in here or on
+# any other thin client to pick up where you left off.
+
+source "$OMARCHY_PATH/default/thin/client.sh"
+thin_load_config || exit 1
+
+echo "${1:-You left your desktop. Your apps are still running.}" >"$OMARCHY_THIN_STATE/reason"
+ssh "${OMARCHY_THIN_SSH_OPTS[@]}" -O exit "$OMARCHY_THIN_DESTINATION" >/dev/null 2>&1
+systemctl --user stop omarchy-thin-link.service 2>/dev/null

@@ -1,0 +1,48 @@
+#!/bin/bash
+
+# omarchy:summary=Ask for the Omarchy server sign-in on a thin client
+# omarchy:args=[message]
+# omarchy:hidden=true
+
+# Runs full screen in a terminal opened by omarchy-thin-greeter, and hands the
+# username and password back through a 0600 file in the runtime directory.
+
+source "$OMARCHY_PATH/default/thin/client.sh"
+thin_load_config || exit 1
+
+message=${1:-}
+login_file="$OMARCHY_THIN_STATE/login"
+
+trap 'exit 0' INT TERM
+
+while true; do
+  clear
+  omarchy-show-logo 2>/dev/null || true
+  echo
+  gum style --bold "Sign in to $OMARCHY_THIN_SERVER"
+  if [[ -n $message ]]; then
+    gum style --foreground 1 "$message"
+  fi
+  gum style --faint "Super + Ctrl + N for network settings · Super + Escape to restart or shut down"
+  echo
+
+  username=$(gum input --placeholder "Username" --prompt "  ") || continue
+  username=${username,,}
+  if [[ ! $username =~ ^[a-z_][a-z0-9_-]{0,31}$ ]]; then
+    message="Enter your username for $OMARCHY_THIN_SERVER."
+    continue
+  fi
+
+  password=$(gum input --password --placeholder "Password" --prompt "  ") || continue
+  if [[ -z $password ]]; then
+    message="Enter your password."
+    continue
+  fi
+
+  umask 077
+  printf '%s\n%s\n' "$username" "$password" >"$login_file.tmp"
+  mv "$login_file.tmp" "$login_file"
+  clear
+  gum style --bold "Signing in as $username..."
+  exit 0
+done

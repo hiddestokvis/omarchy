@@ -1,49 +1,92 @@
 #!/bin/bash
 
-# omarchy:summary=Turn this machine into an Omarchy server for thin clients
+# omarchy:summary=Turn this machine into an Omarchy server that runs desktops for thin clients
+# omarchy:args=[--allow-unencrypted]
 # omarchy:requires-sudo=true
 
-# Every user's apps, files and processing live here; thin clients connect
-# over SSH and show the windows. Sets up:
-#   - waypipe, xwayland-satellite, the audio and camera tooling
-#   - sshd tuned for many multiplexed channels per client
-#   - fair sharing between users (CPU, IO, memory, tasks per user slice)
-#   - a private virtual webcam per user
+# Every person's desktop, apps and files live here; thin clients sign in over
+# SSH and show it. Sets up:
+#   - the pinned wprs build, plus audio and camera tooling
+#   - sshd: enrolled device key + the person's password for thin client users
+#   - fair sharing between people (CPU, IO, memory, tasks)
+#   - per-person outbound firewall rules and private virtual webcams
+#   - a default profile
+# The disk must be encrypted: it holds everyone's files.
 
 set -euo pipefail
 
-if (( EUID != 0 )); then
-  exec sudo "$0" "$@"
+allow_unencrypted=0
+[[ ${1:-} == "--allow-unencrypted" ]] && allow_unencrypted=1
+
+if (( EUID == 0 )); then
+  echo "Run omarchy-server-setup as your admin user (it asks for sudo); the wprs build can't run as root." >&2
+  exit 1
+fi
+
+root_source=$(findmnt -no SOURCE / | sed 's/\[.*\]$//')
+if ! lsblk -s -no TYPE "$root_source" 2>/dev/null | grep -qx crypt; then
+  if (( allow_unencrypted )); then
+    echo "Warning: the system disk is not encrypted. Everyone's files are readable to anyone holding the disk." >&2
+  else
+    echo "The system disk is not encrypted, and this server would hold everyone's files." >&2
+    echo "Reinstall Omarchy with disk encryption on, or pass --allow-unencrypted to accept the risk." >&2
+    exit 1
+  fi
 fi
 
 echo "Installing server packages..."
 mapfile -t packages < <(grep -vE '^\s*(#|$)' "$OMARCHY_PATH/install/omarchy-server.packages")
 omarchy-pkg-add "${packages[@]}"
 
-install -d -m 755 /etc/omarchy-server
-touch /etc/omarchy-server/users
+if ! omarchy-pkg-present omarchy-wprs; then
+  echo "Building wprs (once; thin clients reuse this build)..."
+  omarchy-server-wprs-build
+fi
+
+sudo bash -s "$OMARCHY_PATH" <<'ROOT'
+set -euo pipefail
+OMARCHY_PATH=$1
+
+groupadd --force omarchy-thin
+install -d -m 755 /etc/omarchy-server /etc/omarchy-server/profiles /etc/omarchy-server/backgrounds
+touch /etc/omarchy-server/users /etc/omarchy-server/devices
+chmod 644 /etc/omarchy-server/users /etc/omarchy-server/devices
+if [[ ! -f /etc/omarchy-server/profiles/default.conf ]]; then
+  install -m 644 "$OMARCHY_PATH/default/thin/profile.conf" /etc/omarchy-server/profiles/default.conf
+fi
 
 install -d -m 755 /etc/ssh/sshd_config.d
 cat >/etc/ssh/sshd_config.d/50-omarchy-server.conf <<'CONF'
-# Omarchy server: one SSH connection per thin client carries every terminal,
-# app launch and media stream as a multiplexed channel.
+# Omarchy server. One SSH connection per thin client carries the display,
+# terminals, app launches and media streams as multiplexed channels.
 MaxSessions 128
-# waypipe and PulseAudio forwarding use Unix sockets.
-AllowStreamLocalForwarding yes
-StreamLocalBindUnlink yes
-# Notice dead clients within two minutes, and don't drop live ones on a blip.
-ClientAliveInterval 15
-ClientAliveCountMax 8
-CONF
-systemctl enable --now sshd
-systemctl reload sshd
+ClientAliveInterval 10
+ClientAliveCountMax 3
 
-if omarchy-cmd-present ufw; then
+Match Group omarchy-thin
+  # An enrolled device key, then the person's own password.
+  AuthorizedKeysFile /etc/omarchy-server/devices
+  AuthenticationMethods publickey,keyboard-interactive:pam
+  KbdInteractiveAuthentication yes
+  PasswordAuthentication no
+  # The display socket is forwarded; nothing else leaves the server.
+  AllowStreamLocalForwarding local
+  AllowTcpForwarding no
+  X11Forwarding no
+  AllowAgentForwarding no
+  PermitTunnel no
+CONF
+sshd -t
+systemctl enable sshd
+systemctl reload-or-restart sshd
+
+if command -v ufw >/dev/null; then
   ufw allow 22/tcp comment 'omarchy-server'
 fi
 
-# Fair share between users: equal CPU and IO weight, no user can push the
-# server into swap for everyone else, and a fork bomb stays one user's problem.
+# Fair share between people: equal CPU and IO weight, no one can push the
+# server into swap for everyone else, and a fork bomb stays one person's
+# problem. Profiles narrow this per person.
 install -d -m 755 /etc/systemd/system/user-.slice.d
 cat >/etc/systemd/system/user-.slice.d/50-omarchy-server.conf <<'CONF'
 [Slice]
@@ -53,10 +96,16 @@ MemoryHigh=70%
 MemoryMax=85%
 TasksMax=8192
 CONF
-systemctl daemon-reload
 
-omarchy-server-cameras --apply
+install -m 644 "$OMARCHY_PATH/default/systemd/system/omarchy-server-firewall.service" /etc/systemd/system/
+systemctl daemon-reload
+"$OMARCHY_PATH/bin/omarchy-server-firewall" --apply
+systemctl enable omarchy-server-firewall.service
+"$OMARCHY_PATH/bin/omarchy-server-cameras" --apply
+ROOT
 
 echo
-echo "The server is ready. Add each person who will connect with:"
-echo "  omarchy server user add <username>"
+echo "The server is ready."
+echo "  Add people:        omarchy server user add <username> [profile]"
+echo "  Shape what they get: omarchy server profile edit default"
+echo "  Thin clients:      run 'omarchy thin install $(hostname)' on each device"

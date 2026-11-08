@@ -1,0 +1,10 @@
+#!/bin/bash
+
+# Thin client overlay: locking leaves the desktop (apps keep running on the
+# server) and shows the sign-in screen, which asks for the server password.
+# Only the local thin account exists here, so a local lock screen would guard
+# nothing of yours.
+
+if omarchy-thin-active; then
+  exec omarchy-thin-logout "Locked. Sign in to continue where you left off."
+fi

@@ -1,0 +1,13 @@
+#!/bin/bash
+
+# Thin client overlay: a theme picked here also applies to your apps on the
+# server, and is what you get on any thin client you sign in to.
+
+PATH=${PATH//"$OMARCHY_PATH/default/thin/bin:"/} omarchy-theme-set "$@"
+status=$?
+
+if (( status == 0 )) && [[ -n ${1:-} ]] && omarchy-thin-active; then
+  omarchy-thin-look push "$1" >/dev/null 2>&1 &
+fi
+
+exit "$status"

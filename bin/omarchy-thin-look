@@ -1,0 +1,52 @@
+#!/bin/bash
+
+# omarchy:summary=Bring your server theme and background to this thin client, or send a change back
+# omarchy:args=<pull|push <theme>>
+# omarchy:hidden=true
+
+# The server keeps each person's theme and background (an admin may set and
+# lock them in a profile). At sign-in the device takes them on, so the bar,
+# window borders, terminals and wallpaper match the apps drawn by the server.
+
+set -uo pipefail
+
+source "$OMARCHY_PATH/default/thin/client.sh"
+thin_load_config || exit 1
+thin_connected || exit 1
+
+real_theme_set() {
+  PATH=${PATH//"$OMARCHY_PATH/default/thin/bin:"/} omarchy-theme-set "$@"
+}
+
+case ${1:-} in
+pull)
+  stage=$(mktemp -d)
+  trap 'rm -rf "$stage"' EXIT
+  thin_ssh -T "$OMARCHY_THIN_DESTINATION" -- omarchy-server-look bundle | tar -C "$stage" -xzf - || exit 1
+
+  theme=$(<"$stage/theme")
+  if [[ -d $stage/themes/$theme ]]; then
+    mkdir -p "$HOME/.config/omarchy/themes"
+    rm -rf "$HOME/.config/omarchy/themes/$theme"
+    cp -a "$stage/themes/$theme" "$HOME/.config/omarchy/themes/$theme"
+  fi
+  [[ -n $theme ]] && real_theme_set "$theme"
+
+  background=$(find "$stage" -maxdepth 1 -name 'background.*' -print -quit)
+  if [[ -n $background ]]; then
+    mkdir -p "$HOME/.local/share/omarchy-thin-look"
+    cp "$background" "$HOME/.local/share/omarchy-thin-look/"
+    omarchy-theme-bg-set "$HOME/.local/share/omarchy-thin-look/${background##*/}"
+  fi
+  ;;
+push)
+  theme=${2:?Usage: omarchy-thin-look push <theme>}
+  if ! thin_ssh -n -T "$OMARCHY_THIN_DESTINATION" -- omarchy-server-look set "$(thin_remote_command "$theme")"; then
+    omarchy-notification-send -g 󰏘 "Your administrator has set the theme" "It changes back at your next sign-in."
+  fi
+  ;;
+*)
+  echo "Usage: omarchy-thin-look <pull|push <theme>>" >&2
+  exit 1
+  ;;
+esac

@@ -1,0 +1,69 @@
+#!/bin/bash
+
+# omarchy:summary=Read or change the caller's theme and background for their thin clients
+# omarchy:args=<bundle|enforce|set <theme> [--force]>
+# omarchy:hidden=true
+
+#   bundle  tar on stdout: theme (the name), themes/<name> for a custom theme,
+#           background.<ext> for the current background
+#   enforce put back the profile's theme when the profile locks it
+#   set     apply a theme for this person; refused when their profile locks it,
+#           unless --force (used when an admin applies the profile)
+
+set -uo pipefail
+
+state="$HOME/.local/state/omarchy/current"
+
+# Prints the profile's theme when the profile locks it.
+locked_theme() {
+  local profile
+  profile=$(awk -v u="$USER" '$1 == u { print $2 }' /etc/omarchy-server/users 2>/dev/null)
+  [[ -n $profile ]] || return 1
+  (
+    THEME="" THEME_LOCKED=0
+    source "/etc/omarchy-server/profiles/$profile.conf" 2>/dev/null
+    (( THEME_LOCKED )) && [[ -n $THEME ]] && echo "$THEME"
+  )
+}
+
+case ${1:-} in
+bundle)
+  stage=$(mktemp -d)
+  trap 'rm -rf "$stage"' EXIT
+
+  theme=$(cat "$state/theme.name" 2>/dev/null)
+  echo "$theme" >"$stage/theme"
+  if [[ -n $theme && -d $HOME/.config/omarchy/themes/$theme ]]; then
+    mkdir -p "$stage/themes"
+    cp -aL "$HOME/.config/omarchy/themes/$theme" "$stage/themes/$theme"
+  fi
+
+  background=$(readlink -f "$state/background" 2>/dev/null)
+  if [[ -f $background ]]; then
+    cp "$background" "$stage/background.${background##*.}"
+  fi
+
+  tar -C "$stage" -czf - .
+  ;;
+enforce)
+  if theme=$(locked_theme) && [[ $(cat "$state/theme.name" 2>/dev/null) != "$theme" ]]; then
+    omarchy-theme-set "$theme" >/dev/null 2>&1
+  fi
+  exit 0
+  ;;
+set)
+  theme=${2:?Usage: omarchy-server-look set <theme> [--force]}
+  if [[ ${3:-} != "--force" ]] && locked_theme >/dev/null; then
+    echo "The theme is set by your administrator." >&2
+    exit 1
+  fi
+  # No compositor or shell runs here, so the parts of theme-set that reload
+  # them have nothing to do; the configs apps read are what matters.
+  omarchy-theme-set "$theme" >/dev/null 2>&1
+  [[ $(cat "$state/theme.name" 2>/dev/null) == "$theme" ]]
+  ;;
+*)
+  echo "Usage: omarchy-server-look <bundle|enforce|set <theme> [--force]>" >&2
+  exit 1
+  ;;
+esac

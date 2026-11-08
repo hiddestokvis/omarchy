@@ -47,6 +47,9 @@
   "system.logout": {
     "label": "Logout"
   },
+  "system.signout": {
+    "label": "Sign Out of Server"
+  },
   "system.reboot": {
     "label": "Reboot"
   },

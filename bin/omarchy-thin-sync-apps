@@ -22,14 +22,14 @@ thin_wait_connected 30 || {
 target="$HOME/.local/share/omarchy-thin"
 fingerprint_file="$target/.fingerprint"
 
-fingerprint=$(thin_ssh -T "$OMARCHY_THIN_SERVER" -- omarchy-server-apps-export --fingerprint)
+fingerprint=$(thin_ssh -T "$OMARCHY_THIN_DESTINATION" -- omarchy-server-apps-export --fingerprint)
 if [[ ${1:-} != "--force" && -f $fingerprint_file && $(<"$fingerprint_file") == "$fingerprint" ]]; then
   exit 0
 fi
 
 stage=$(mktemp -d)
 trap 'rm -rf "$stage"' EXIT
-thin_ssh -T "$OMARCHY_THIN_SERVER" -- omarchy-server-apps-export | tar -C "$stage" -xzf -
+thin_ssh -T "$OMARCHY_THIN_DESTINATION" -- omarchy-server-apps-export | tar -C "$stage" -xzf -
 
 shopt -s nullglob
 for entry in "$stage"/applications/*.desktop; do

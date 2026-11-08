@@ -1,6 +1,8 @@
-# Omarchy thin client (omarchy-thin-setup).
+# Omarchy thin client (omarchy-thin-install). wprs comes from the server's
+# build, or is built from default/thin/pkg/wprs.
 openssh
-waypipe
+foot
+gum
 gst-plugins-base
 gst-plugins-good
 ffmpeg
