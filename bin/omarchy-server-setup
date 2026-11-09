@@ -95,6 +95,9 @@ Match Group omarchy-thin
   AllowAgentForwarding no
   PermitTunnel no
 CONF
+# Omarchy ships sshd disabled, so the host keys (the server's identity, which
+# thin clients pin) may not exist yet; sshd -t refuses to run without them.
+ssh-keygen -A
 sshd -t
 systemctl enable sshd
 systemctl reload-or-restart sshd
