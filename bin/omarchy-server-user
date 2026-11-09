@@ -7,6 +7,12 @@
 
 set -euo pipefail
 
+# sudo drops the session's environment; take OMARCHY_PATH (a checkout, after
+# omarchy dev link) from the same place every Omarchy shell does.
+if [[ -z ${OMARCHY_PATH:-} ]]; then
+  source /usr/share/omarchy/default/bash/env-bootstrap
+fi
+
 users_file=/etc/omarchy-server/users
 profiles=/etc/omarchy-server/profiles
 
@@ -60,12 +66,15 @@ add)
     useradd --create-home --shell /bin/bash --groups omarchy-thin "$user"
     echo "Choose a password for $user. It is what they type on the thin client sign-in screen."
     passwd "$user"
-    # Shipped configs came from /etc/skel; finish the per-user setup as the user.
-    runuser -u "$user" -- env OMARCHY_PATH="$OMARCHY_PATH" omarchy-provision-user ||
-      echo "omarchy-provision-user did not finish; $user can run 'omarchy finalize user' later." >&2
   else
     usermod --append --groups omarchy-thin "$user"
   fi
+
+  # Shipped configs came from /etc/skel; finish the per-user setup as the user.
+  # It keeps its own done-marker, so running it for an existing account is safe.
+  home=$(getent passwd "$user" | cut -d: -f6)
+  (cd "$home" && runuser -u "$user" -- env HOME="$home" OMARCHY_PATH="$OMARCHY_PATH" omarchy-provision-user) ||
+    echo "omarchy-provision-user did not finish; $user can run 'omarchy finalize user' later." >&2
 
   # Lingering keeps the person's desktop and apps running between sign-ins.
   loginctl enable-linger "$user"

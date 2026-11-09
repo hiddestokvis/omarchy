@@ -16,7 +16,9 @@ if (( EUID != 0 )); then
   exec sudo "$0" "$@"
 fi
 
-OMARCHY_PATH=${OMARCHY_PATH:-/usr/share/omarchy}
+if [[ -z ${OMARCHY_PATH:-} ]]; then
+  source /usr/share/omarchy/default/bash/env-bootstrap
+fi
 
 # No password, no sudo, nothing of anyone's: everything personal is on the server.
 if ! id thin >/dev/null 2>&1; then

@@ -19,7 +19,9 @@ if (( EUID != 0 )); then
   exec sudo "$0" "$@"
 fi
 
-OMARCHY_PATH=${OMARCHY_PATH:-/usr/share/omarchy}
+if [[ -z ${OMARCHY_PATH:-} ]]; then
+  source /usr/share/omarchy/default/bash/env-bootstrap
+fi
 export OMARCHY_PATH
 
 first_boot=0 server="" port="" name="" admin=""

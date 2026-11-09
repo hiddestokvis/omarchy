@@ -7,6 +7,12 @@
 
 set -euo pipefail
 
+# sudo drops the session's environment; take OMARCHY_PATH (a checkout, after
+# omarchy dev link) from the same place every Omarchy shell does.
+if [[ -z ${OMARCHY_PATH:-} ]]; then
+  source /usr/share/omarchy/default/bash/env-bootstrap
+fi
+
 if (( EUID != 0 )); then
   exec sudo "$0" "$@"
 fi
