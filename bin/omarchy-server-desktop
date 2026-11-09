@@ -170,8 +170,10 @@ attach() {
   trap 'echo moved; kill "$mine" 2>/dev/null; exit 0' USR1
 
   # Held open until the device disconnects or another device takes over.
-  # Waiting on a background cat keeps the USR1 trap responsive.
-  cat >/dev/null &
+  # Waiting on a background cat keeps the USR1 trap responsive. A script's
+  # background job reads /dev/null unless told otherwise, which would end the
+  # session at once, so hand cat the channel explicitly.
+  cat >/dev/null <&0 &
   wait "$!"
 }
 
