@@ -65,7 +65,7 @@ Signing in takes two things: a device the server knows, and the person's passwor
 The thin client ISO installs only what a thin client needs: the desktop, terminals, fonts and hardware support, without any apps. It's a fraction of the size of the full Omarchy ISO, and installs much faster on old machines.
 
 1. Write the thin client ISO to a USB stick and boot the device from it, as you would for Omarchy.
-2. Answer the installer's questions. Keep disk encryption on. The account you create is the device's admin account, for maintenance; people sign in with their server accounts.
+2. Answer the installer's questions. There's no personal account to create, since people sign in with their server accounts. You choose a time zone, a name for the device, and the disk passphrase, typed when the device starts. The passphrase is also the password of the device's maintenance account, `admin`, which you use for updates on another console (`Ctrl + Alt + F3`).
 3. On the first boot, before the desktop starts, the device asks for:
    - a network, offering Wi-Fi setup if there's no cable
    - the server's address, and to compare its fingerprint with what `ssh-keygen -lf /etc/ssh/ssh_host_ed25519_key.pub` shows on the server
