@@ -94,9 +94,10 @@ run() {
   systemctl --user import-environment "${present_vars[@]}"
   dbus-update-activation-environment --systemd "${present_vars[@]}"
 
+  # A socket left by a desktop that crashed would pass for a running one.
+  rm -f "$XDG_RUNTIME_DIR/wprs.sock"
   wprsd --wayland-display "$wayland_display" \
     --socket "$XDG_RUNTIME_DIR/wprs.sock" \
-    --control-socket "$XDG_RUNTIME_DIR/wprsd-ctrl.sock" \
     --enable-xwayland true \
     --xwayland-xdg-shell-args="--display,$x_display" \
     --kde-server-side-decorations false
@@ -145,13 +146,18 @@ attach() {
   if ! systemctl --user cat omarchy-server-desktop.service >/dev/null 2>&1; then
     systemctl --user link "$OMARCHY_PATH/default/systemd/user/omarchy-server-desktop.service" >/dev/null
   fi
+  if ! systemctl --user is-active --quiet omarchy-server-desktop.service; then
+    rm -f "$XDG_RUNTIME_DIR/wprs.sock"
+  fi
   systemctl --user start omarchy-server-desktop.service
   for _ in {1..40}; do
     [[ -S $XDG_RUNTIME_DIR/wprs.sock ]] && break
     sleep 0.25
   done
+  # Give wprsd a moment to fail on a bad start rather than vanish after "ready".
+  sleep 1
 
-  if [[ ! -S $XDG_RUNTIME_DIR/wprs.sock ]]; then
+  if [[ ! -S $XDG_RUNTIME_DIR/wprs.sock ]] || ! systemctl --user is-active --quiet omarchy-server-desktop.service; then
     echo "error the desktop did not start; ask an admin to check: journalctl --user -u omarchy-server-desktop"
     exit 1
   fi
