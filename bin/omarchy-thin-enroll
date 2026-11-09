@@ -120,8 +120,8 @@ while true; do
     if omarchy-hw-x86; then arch=x86_64; else arch=aarch64; fi
     gum style "Fetching the server's display software..."
     if scp -q -P "$port" -F none -o UserKnownHostsFile="$work/known_hosts" -o HostKeyAlias=omarchy-server \
-      -o StrictHostKeyChecking=yes "$admin@$server:/var/lib/omarchy-server/packages/omarchy-wprs-*-$arch.pkg.tar.zst" "$work/"; then
-      pacman -U --noconfirm "$work"/omarchy-wprs-*.pkg.tar.zst
+      -o StrictHostKeyChecking=yes "$admin@$server:/var/lib/omarchy-server/packages/omarchy-wprs-*-$arch.pkg.tar.*" "$work/"; then
+      pacman -U --noconfirm "$work"/omarchy-wprs-*-"$arch".pkg.tar.*
     else
       gum style --foreground 3 "The server has no $arch build. After setup, build it here with: omarchy-server-wprs-build"
       sleep 5

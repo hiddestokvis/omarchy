@@ -17,8 +17,15 @@ fi
 work=$(mktemp -d)
 trap 'rm -rf "$work"' EXIT
 cp "$OMARCHY_PATH/default/thin/pkg/wprs/PKGBUILD" "$work/"
-(cd "$work" && makepkg --syncdeps --noconfirm --needed)
+# PKGDEST pins where the package lands, whatever makepkg.conf says, and the
+# extension varies: Arch Linux ARM's makepkg.conf still makes .pkg.tar.xz.
+mkdir -p "$work/out"
+(cd "$work" && PKGDEST="$work/out" makepkg --syncdeps --noconfirm --needed)
 
-package=$(find "$work" -maxdepth 1 -name 'omarchy-wprs-*.pkg.tar.zst' -print -quit)
+package=$(find "$work/out" -maxdepth 1 -name 'omarchy-wprs-*.pkg.tar.*' ! -name '*.sig' -print -quit)
+if [[ -z $package ]]; then
+  echo "makepkg finished, but no omarchy-wprs package turned up in $work/out" >&2
+  exit 1
+fi
 sudo pacman -U --noconfirm "$package"
 sudo install -D -m 644 "$package" "/var/lib/omarchy-server/packages/${package##*/}"
