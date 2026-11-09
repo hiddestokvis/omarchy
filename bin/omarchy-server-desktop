@@ -148,6 +148,8 @@ attach() {
   fi
   if ! systemctl --user is-active --quiet omarchy-server-desktop.service; then
     rm -f "$XDG_RUNTIME_DIR/wprs.sock"
+    # Crashes in a row leave the unit refusing to start; a sign-in tries again.
+    systemctl --user reset-failed omarchy-server-desktop.service 2>/dev/null
   fi
   systemctl --user start omarchy-server-desktop.service
   for _ in {1..40}; do
