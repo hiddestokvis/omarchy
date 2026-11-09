@@ -44,6 +44,18 @@ set_profile() {
   echo "$user $1" >>"$users_file"
 }
 
+if [[ $action == "add" ]]; then
+  # Every person's desktop and commands run from OMARCHY_PATH, so they must be
+  # able to read it. A dev-linked checkout inside a home folder usually isn't.
+  if ! runuser -u nobody -- test -r "$OMARCHY_PATH/bin/omarchy" 2>/dev/null; then
+    echo "Other accounts can't read $OMARCHY_PATH, where Omarchy runs from (omarchy dev link)." >&2
+    echo "Move the checkout somewhere everyone can read, such as /opt/omarchy:" >&2
+    echo "  sudo mv $OMARCHY_PATH /opt/omarchy && sudo chown -R $(stat -c %U "$OMARCHY_PATH" 2>/dev/null || echo "$USER"): /opt/omarchy && sudo chmod -R a+rX /opt/omarchy" >&2
+    echo "  omarchy dev link /opt/omarchy   (then reboot and run omarchy server setup again)" >&2
+    exit 1
+  fi
+fi
+
 case $action in
 list)
   printf '%-20s %-16s %s\n' USER PROFILE DESKTOP

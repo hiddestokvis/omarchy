@@ -56,6 +56,16 @@ sudo bash -s "$OMARCHY_PATH" <<'ROOT'
 set -euo pipefail
 OMARCHY_PATH=$1
 
+# Every person's desktop and commands run from OMARCHY_PATH, so they must be
+# able to read it. A dev-linked checkout inside a home folder usually isn't.
+if ! runuser -u nobody -- test -r "$OMARCHY_PATH/bin/omarchy" 2>/dev/null; then
+  echo "Other accounts can't read $OMARCHY_PATH, where Omarchy runs from (omarchy dev link)." >&2
+  echo "Move the checkout somewhere everyone can read, such as /opt/omarchy:" >&2
+  echo "  sudo mv $OMARCHY_PATH /opt/omarchy && sudo chown -R $(stat -c %U "$OMARCHY_PATH" 2>/dev/null || echo "$USER"): /opt/omarchy && sudo chmod -R a+rX /opt/omarchy" >&2
+  echo "  omarchy dev link /opt/omarchy   (then reboot and run omarchy server setup again)" >&2
+  exit 1
+fi
+
 groupadd --force omarchy-thin
 install -d -m 755 /etc/omarchy-server /etc/omarchy-server/profiles /etc/omarchy-server/backgrounds
 touch /etc/omarchy-server/users /etc/omarchy-server/devices
