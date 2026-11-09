@@ -88,9 +88,12 @@ Match Group omarchy-thin
   AuthenticationMethods publickey,keyboard-interactive:pam
   KbdInteractiveAuthentication yes
   PasswordAuthentication no
-  # The display socket is forwarded; nothing else leaves the server.
+  # The display socket is forwarded from the server to the device. OpenSSH
+  # gates socket forwarding behind TCP forwarding too (AllowTcpForwarding no
+  # refuses it), so allow local forwarding: people can already run programs
+  # here, and what they forward runs as them, inside their firewall rules.
   AllowStreamLocalForwarding local
-  AllowTcpForwarding no
+  AllowTcpForwarding local
   X11Forwarding no
   AllowAgentForwarding no
   PermitTunnel no
