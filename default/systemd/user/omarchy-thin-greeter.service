@@ -8,7 +8,7 @@ ConditionPathExists=/etc/omarchy-thin/thin.conf
 
 [Service]
 Type=simple
-ExecStart=/usr/bin/omarchy-thin-greeter
+ExecStart=/bin/bash -c ". /usr/share/omarchy/default/bash/env-bootstrap; exec omarchy-thin-greeter"
 Restart=always
 RestartSec=1
 

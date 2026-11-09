@@ -8,6 +8,6 @@ Wants=pipewire.service pipewire-pulse.service wireplumber.service
 
 [Service]
 Type=simple
-ExecStart=/usr/bin/omarchy-server-desktop run
+ExecStart=/bin/bash -c ". /usr/share/omarchy/default/bash/env-bootstrap; exec omarchy-server-desktop run"
 Restart=on-failure
 RestartSec=2

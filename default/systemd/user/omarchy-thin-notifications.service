@@ -5,7 +5,7 @@ PartOf=omarchy-thin-session.target
 
 [Service]
 Type=simple
-ExecStart=/usr/bin/omarchy-thin-notifications
+ExecStart=/bin/bash -c ". /usr/share/omarchy/default/bash/env-bootstrap; exec omarchy-thin-notifications"
 Restart=always
 RestartSec=2
 

@@ -97,6 +97,13 @@ MemoryMax=85%
 TasksMax=8192
 CONF
 
+# Thin clients call the server's commands over SSH, which only searches the
+# system PATH. With omarchy dev link they live in a checkout, so expose them.
+rm -f /usr/local/bin/omarchy-server-* /usr/local/bin/omarchy-thin-*
+if [[ $OMARCHY_PATH != /usr/share/omarchy ]]; then
+  ln -s "$OMARCHY_PATH"/bin/omarchy-server-* "$OMARCHY_PATH"/bin/omarchy-thin-* /usr/local/bin/
+fi
+
 install -m 644 "$OMARCHY_PATH/default/systemd/system/omarchy-server-firewall.service" /etc/systemd/system/
 systemctl daemon-reload
 "$OMARCHY_PATH/bin/omarchy-server-firewall" --apply

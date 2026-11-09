@@ -4,6 +4,6 @@ PartOf=omarchy-thin-session.target
 
 [Service]
 Type=simple
-ExecStart=/usr/bin/omarchy-thin-display
+ExecStart=/bin/bash -c ". /usr/share/omarchy/default/bash/env-bootstrap; exec omarchy-thin-display"
 Restart=on-failure
 RestartSec=1

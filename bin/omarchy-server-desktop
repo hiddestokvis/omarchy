@@ -18,6 +18,12 @@
 
 set -uo pipefail
 
+# Thin clients run this over SSH, where no login shell has set up Omarchy's
+# environment (and OMARCHY_PATH points at a checkout after omarchy dev link).
+if [[ -z ${OMARCHY_PATH:-} ]]; then
+  source /usr/share/omarchy/default/bash/env-bootstrap
+fi
+
 state="$XDG_RUNTIME_DIR/omarchy-thin"
 env_file="$state/env"
 wayland_display=wprs-0
@@ -66,7 +72,7 @@ run() {
   export XDG_SESSION_TYPE=wayland
   export XDG_CURRENT_DESKTOP=Hyprland
   export OMARCHY_THIN_SESSION=1
-  export PATH="${OMARCHY_PATH:-/usr/share/omarchy}/default/thin/server-bin:$PATH"
+  export PATH="$OMARCHY_PATH/default/thin/server-bin:$PATH"
   export MOZ_ENABLE_WAYLAND=1
   export ELECTRON_OZONE_PLATFORM_HINT=wayland
   export QT_QPA_PLATFORM="wayland;xcb"
@@ -133,6 +139,12 @@ attach() {
   echo "$$ $mine $device" >"$state/attached"
 
   omarchy-server-look enforce
+
+  # Packaged installs ship the unit in /usr/lib/systemd/user; otherwise link it
+  # from Omarchy's tree the first time this person signs in.
+  if ! systemctl --user cat omarchy-server-desktop.service >/dev/null 2>&1; then
+    systemctl --user link "$OMARCHY_PATH/default/systemd/user/omarchy-server-desktop.service" >/dev/null
+  fi
   systemctl --user start omarchy-server-desktop.service
   for _ in {1..40}; do
     [[ -S $XDG_RUNTIME_DIR/wprs.sock ]] && break
