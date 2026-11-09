@@ -38,6 +38,15 @@ if ! lsblk -s -no TYPE "$root_source" 2>/dev/null | grep -qx crypt; then
   gum confirm "Continue anyway?" || exit 1
 fi
 
+# omarchy-pkg-add installs from the local package databases without
+# refreshing them (a refresh without a full upgrade is a partial upgrade).
+# After a channel switch they don't exist until the next update.
+if ! pacman -Si pacman >/dev/null 2>&1; then
+  echo "The package databases are missing or out of date (common right after 'omarchy channel set')." >&2
+  echo "Run 'omarchy update' first, then run this again." >&2
+  exit 1
+fi
+
 echo "Installing thin client packages..."
 mapfile -t packages < <(grep -vE '^\s*(#|$)' "$OMARCHY_PATH/install/omarchy-thin.packages")
 omarchy-pkg-add "${packages[@]}"
