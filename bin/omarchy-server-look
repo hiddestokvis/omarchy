@@ -47,7 +47,7 @@ bundle)
   ;;
 enforce)
   if theme=$(locked_theme) && [[ $(cat "$state/theme.name" 2>/dev/null) != "$theme" ]]; then
-    omarchy-theme-set "$theme" >/dev/null 2>&1
+    OMARCHY_THEME_HEADLESS=1 omarchy-theme-set "$theme" >/dev/null 2>&1
   fi
   exit 0
   ;;
@@ -59,7 +59,7 @@ set)
   fi
   # No compositor or shell runs here, so the parts of theme-set that reload
   # them have nothing to do; the configs apps read are what matters.
-  omarchy-theme-set "$theme" >/dev/null 2>&1
+  OMARCHY_THEME_HEADLESS=1 omarchy-theme-set "$theme" >/dev/null 2>&1
   [[ $(cat "$state/theme.name" 2>/dev/null) == "$theme" ]]
   ;;
 *)

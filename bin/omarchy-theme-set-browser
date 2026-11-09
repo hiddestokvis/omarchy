@@ -50,6 +50,11 @@ for dir in "${POLICY_DIRS[@]}"; do
 done
 $saw_any && $all_unchanged && exit 0
 
+# On an Omarchy server (omarchy-server-setup) the browser policy is shared by
+# everyone it serves, so one person's theme must not recolour every browser,
+# and most of them may not change it anyway.
+[[ -f /etc/omarchy-server/users ]] && exit 0
+
 failed=0
 # A script's background job reads /dev/null unless told otherwise, which would
 # turn the writer's terminal sudo prompt into a pkexec dialog. Keep stdin.

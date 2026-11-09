@@ -85,7 +85,7 @@ add)
   # Shipped configs came from /etc/skel; finish the per-user setup as the user.
   # It keeps its own done-marker, so running it for an existing account is safe.
   home=$(getent passwd "$user" | cut -d: -f6)
-  (cd "$home" && runuser -u "$user" -- env HOME="$home" OMARCHY_PATH="$OMARCHY_PATH" omarchy-provision-user) ||
+  (cd "$home" && runuser -u "$user" -- env HOME="$home" OMARCHY_PATH="$OMARCHY_PATH" OMARCHY_SETUP_CONTEXT=omarchy-server omarchy-provision-user </dev/null) ||
     echo "omarchy-provision-user did not finish; $user can run 'omarchy finalize user' later." >&2
 
   # Lingering keeps the person's desktop and apps running between sign-ins.
