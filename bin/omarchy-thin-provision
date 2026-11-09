@@ -43,7 +43,7 @@ fi
 
 home=$(getent passwd thin | cut -d: -f6)
 as_thin() {
-  runuser -u thin -- env HOME="$home" OMARCHY_PATH="$OMARCHY_PATH" OMARCHY_SETUP_CONTEXT="${OMARCHY_SETUP_CONTEXT:-runtime}" "$@"
+  runuser -u thin -- env HOME="$home" OMARCHY_PATH="$OMARCHY_PATH" OMARCHY_SETUP_CONTEXT="${OMARCHY_SETUP_CONTEXT:-omarchy-thin}" "$@" </dev/null
 }
 
 as_thin mkdir -p "$home/.config/uwsm/env.d" "$home/.config/systemd/user/graphical-session.target.wants"
